@@ -573,7 +573,7 @@ fflush(box_);
 
 void box2d()
 {
-static FILE *box2d_;
+static FILE *snapshots_2d_phi_;
 int i, j, k;
 if(N < 64)
     i = 5;
@@ -584,23 +584,23 @@ static int first=1;
 if(first) // Open output files
 {
 
-snprintf(name_, sizeof(name_), "results/box2d%s",ext_);
-box2d_=fopen(name_,mode_);
+snprintf(name_, sizeof(name_), "results/snapshots_2d_phi%s",ext_);
+snapshots_2d_phi_=fopen(name_,mode_);
 
 first=0;
 }
 
 for(j=0;j<N;j++)for(k=0;k<N;k++)
 {
-fprintf(box2d_,"%.17g\n",f[i][j][k]);
+fprintf(snapshots_2d_phi_,"%.17g\n",f[i][j][k]);
 }
-fprintf(box2d_,"\n");
-fflush(box2d_);
+fprintf(snapshots_2d_phi_,"\n");
+fflush(snapshots_2d_phi_);
 }
 
 void box2dot()
 {
-static FILE *box2dot_;
+static FILE *snapshots_2d_phidot_;
 int i, j, k;
 if(N < 64)
     i = 5;
@@ -610,18 +610,18 @@ static int first=1;
 if(first) // Open output files
 {
 
-snprintf(name_, sizeof(name_), "results/box2dot%s",ext_);
-box2dot_=fopen(name_,mode_);
+snprintf(name_, sizeof(name_), "results/snapshots_2d_phidot%s",ext_);
+snapshots_2d_phidot_=fopen(name_,mode_);
 
 first=0;
 }
 
 for(j=0;j<N;j++)for(k=0;k<N;k++)
 {
-fprintf(box2dot_,"%.17g\n",fd[i][j][k]);
+fprintf(snapshots_2d_phidot_,"%.17g\n",fd[i][j][k]*rescale_B);
 }
-fprintf(box2dot_,"\n");
-fflush(box2dot_);
+fprintf(snapshots_2d_phidot_,"\n");
+fflush(snapshots_2d_phidot_);
 }
 
 void energy()
@@ -956,7 +956,7 @@ fflush(boxN_);
 
 void box2dN()
 {
-static FILE *box2dN_;
+static FILE *snapshots_2d_deltaN_;
 int i, j, k;
 if(N < 64)
     i = 5;
@@ -966,18 +966,18 @@ static int first=1;
 if(first) // Open output files
 {
 
-snprintf(name_, sizeof(name_), "results/box2dN%s",ext_);
-box2dN_=fopen(name_,mode_);
+snprintf(name_, sizeof(name_), "results/snapshots_2d_deltaN%s",ext_);
+snapshots_2d_deltaN_=fopen(name_,mode_);
 
 first=0;
 }
 
 for(j=0;j<N;j++)for(k=0;k<N;k++)
 {
-fprintf(box2dN_,"%.17g\n",deltaN[i][j][k]);
+fprintf(snapshots_2d_deltaN_,"%.17g\n",deltaN[i][j][k]);
 }
-fprintf(box2dN_,"\n");
-fflush(box2dN_);
+fprintf(snapshots_2d_deltaN_,"\n");
+fflush(snapshots_2d_deltaN_);
 }
 
 

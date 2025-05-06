@@ -1,6 +1,5 @@
-# Ignore input and output data folders
-inputs/
-results/
+# Ignore executable
+inflation_easy
 
 # Ignore macOS system files
 .DS_Store
