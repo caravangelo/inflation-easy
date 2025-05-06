@@ -12,6 +12,7 @@
 
 ## Code Structure
 
+### Source files (`src/`)
 - `main.cpp`: Program entry point; contains the `main` function and global variable declarations.
 - `initialize.cpp`: Sets initial field conditions and computes the initial Hubble parameter.
 - `evolution.cpp`: Contains the core algorithms for time evolution of the scalar field.
@@ -19,12 +20,17 @@
 - `potential.cpp`: Defines the inflationary potential, either analytically or from input files.
 - `parameters.h`: Central header for simulation and model parameters.  
   **Important:** Users should carefully edit this file to configure simulations.
-- `inputs/`: Directory for input files (required for numerical potentials):
-  - `field_values.dat`: Field values.
-  - `potential.dat`: Corresponding potential values.
-  - `potential_derivative.dat`: Derivatives of the potential.
-- `results/`: Output directory for simulation data and logs.
-- `plot.ipynb`: A Jupyter notebook that provides a basic example of how to process and visualize the output data.
+
+### Input files (`inputs/`)
+- `field_values.dat`: Field values for the numerical potential.
+- `potential.dat`: Corresponding potential values.
+- `potential_derivative.dat`: Derivatives of the potential.
+
+### Output files (`results/`)
+- Simulation results, logs, spectra, and other diagnostic data are written here.
+
+### Notebook (`notebooks/`)
+- `plot.ipynb`: A Jupyter notebook providing an example of how to process and visualize the output data.
 
 ## Prerequisites
 
