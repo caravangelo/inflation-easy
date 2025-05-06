@@ -49,14 +49,13 @@ The `Makefile` automatically enables OpenMP if the `parallel_calculation` flag i
 Two potential options are currently supported:
 
 1. **Numerical potential (default):**  
-   The default setup implements the USR potential described as Case I in [arXiv:2410.23942](https://arxiv.org/abs/2410.23942), with  
-   $$\mathcal{P}_{\zeta,\text{tree}}^{\text{max}} = 10^{-2}.$$
+   The default setup implements the USR potential described as Case I in [arXiv:2410.23942](https://arxiv.org/abs/2410.23942), with $\mathcal{P}_{\zeta,\text{tree}}^{\text{max}} = 10^{-2}.$
 
    **Note:** The code is slower when using a numerical potential instead of an analytical potential. If you need a faster code (for example if you are running it on a laptop), use an analytical potential instead.
 
 2. **Analytical potential:**  
-   A simple quadratic potential \( V(\phi) = \frac{1}{2}m^2\phi^2 \).  
-   In this case, the delta \( N \) calculation is slower and typically unnecessary due to the small amplitude of perturbations.
+   A simple quadratic potential $ V(\phi) = \frac{1}{2}m^2\phi^2 $.  
+   In this case, the (optional) $ \delta N $ calculation to obtain the fully nonlinear $\zeta$ (see arXiv:????.?????) is slower and typically unnecessary due to the small amplitude of perturbations.
 
 To switch between the two, modify the `numerical_potential` flag in `parameters.h`.
 
@@ -79,7 +78,7 @@ After compilation, run the program from the terminal:
 Simulation output will be written to the `results/` directory. A log of progress is saved to `output.txt`, and additional files contain energy densities, field values, and power spectra.
 
 
-All quantities in the simulation are expressed in **reduced Planck units**, where the reduced Planck mass \( M_{\mathrm{Pl}}^{\text{red}} = \frac{M_{\mathrm Pl}}{\sqrt{8\pi}} =1 \). This means that fundamental constants are set such that \( \hbar = c = 1 \) and \( 8\pi G = 1 \), simplifying the equations and making all quantities dimensionless.
+All quantities in the simulation are expressed in **reduced Planck units**, where the reduced Planck mass $ M_{\mathrm{Pl}}^{\text{red}} = \frac{M_{\mathrm Pl}}{\sqrt{8\pi}} =1 $. This means that fundamental constants are set such that $ \hbar = c = 1 $ and $ 8\pi G = 1 $, simplifying the equations and making all quantities dimensionless.
 
 
 ## Processing example with Jupyter
