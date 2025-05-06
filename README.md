@@ -54,8 +54,8 @@ Two potential options are currently supported:
    **Note:** The code is slower when using a numerical potential instead of an analytical potential. If you need a faster code (for example if you are running it on a laptop), use an analytical potential instead.
 
 2. **Analytical potential:**  
-   A simple quadratic potential $ V(\phi) = \frac{1}{2}m^2\phi^2 $.  
-   In this case, the (optional) $ \delta N $ calculation to obtain the fully nonlinear $\zeta$ (see arXiv:????.?????) is slower and typically unnecessary due to the small amplitude of perturbations.
+   A simple quadratic potential $V(\phi) = \frac{1}{2}m^2\phi^2$.  
+   In this case, the (optional) $\delta N$ calculation to obtain the fully nonlinear $\zeta$ (see arXiv:????.?????) is slower and typically unnecessary due to the small amplitude of perturbations.
 
 To switch between the two, modify the `numerical_potential` flag in `parameters.h`.
 
