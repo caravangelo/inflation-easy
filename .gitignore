@@ -1,0 +1,18 @@
+# Ignore input and output data folders
+inputs/
+results/
+
+# Ignore macOS system files
+.DS_Store
+__MACOSX/
+
+# Ignore Jupyter checkpoints and workspace metadata
+**/.ipynb_checkpoints/
+notebooks/.jupyter/
+
+# Ignore object files and build artifacts
+*.o
+*.out
+*.log
+*.aux
+*.tmp
