@@ -77,7 +77,7 @@ After compilation, run the program from the terminal:
 
 Simulation output will be written to the `results/` directory. A log of progress is saved to `output.txt`, and additional files contain energy densities, field values, power spectra and other useful statistics.
 
-All quantities in the simulation are expressed in **reduced Planck units**, where the reduced Planck mass $M_{\mathrm{Pl}}^{\text{red}} = \frac{M_{\mathrm Pl}}{\sqrt{8\pi}} =1$. This means that fundamental constants are set such that $\hbar = c = 1 $ and $ 8\pi G = 1$, simplifying the equations.
+All quantities in the simulation are expressed in **reduced Planck units**, where the reduced Planck mass $M_{\mathrm{Pl}}^{\text{red}} = \frac{M_{\mathrm Pl}}{\sqrt{8\pi}} =1$. This means that fundamental constants are set such that $\hbar = c = 1$ and $8\pi G = 1$, simplifying the equations.
 
 
 ## Processing example with Jupyter
