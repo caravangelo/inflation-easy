@@ -20,9 +20,9 @@
 - `parameters.h`: Central header for simulation and model parameters.  
   **Important:** Users should carefully edit this file to configure simulations.
 - `inputs/`: Directory for input files (required for numerical potentials):
-  - `field_values.txt`: Field values.
-  - `potential.txt`: Corresponding potential values.
-  - `potential_derivative.txt`: Derivatives of the potential.
+  - `field_values.dat`: Field values.
+  - `potential.dat`: Corresponding potential values.
+  - `potential_derivative.dat`: Derivatives of the potential.
 - `results/`: Output directory for simulation data and logs.
 - `plot.ipynb`: A Jupyter notebook that provides a basic example of how to process and visualize the output data.
 
@@ -64,7 +64,7 @@ To switch between the two, modify the `numerical_potential` flag in `parameters.
 To define your own potential:
 
 - If using an analytical potential, modify the functions in `potential.cpp`.
-- If using a numerical potential, ensure the files `field_values.txt`, `potential.txt`, and `potential_derivative.txt` are placed in the `inputs/` directory. These files must contain one value per line.
+- If using a numerical potential, ensure the files `field_values.dat`, `potential.dat`, and `potential_derivative.dat` are placed in the `inputs/` directory. These files must contain one value per line.
 - Adjust relevant parameters in `parameters.h`.
 
 ### Executing the Program
@@ -75,10 +75,9 @@ After compilation, run the program from the terminal:
 ./inflation_easy
 ```
 
-Simulation output will be written to the `results/` directory. A log of progress is saved to `output.txt`, and additional files contain energy densities, field values, and power spectra.
+Simulation output will be written to the `results/` directory. A log of progress is saved to `output.txt`, and additional files contain energy densities, field values, power spectra and other useful statistics.
 
-
-All quantities in the simulation are expressed in **reduced Planck units**, where the reduced Planck mass $ M_{\mathrm{Pl}}^{\text{red}} = \frac{M_{\mathrm Pl}}{\sqrt{8\pi}} =1 $. This means that fundamental constants are set such that $ \hbar = c = 1 $ and $ 8\pi G = 1 $, simplifying the equations and making all quantities dimensionless.
+All quantities in the simulation are expressed in **reduced Planck units**, where the reduced Planck mass $M_{\mathrm{Pl}}^{\text{red}} = \frac{M_{\mathrm Pl}}{\sqrt{8\pi}} =1$. This means that fundamental constants are set such that $\hbar = c = 1 $ and $ 8\pi G = 1$, simplifying the equations.
 
 
 ## Processing example with Jupyter
