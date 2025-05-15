@@ -1,121 +1,139 @@
-// potential.cpp - Defines inflationary potential and its derivative
-/*
-This file contains the definition of inflationary potential. If the potential is a known analytical function, then change the last 4 function of this file acordingly (these functions are currently set for a quadratic potential), as well as the potential parameters in parameters.h
-*/
+// potential.cpp — Inflationary potential (analytic or tabulated)
+//
+// This file defines the inflationary potential and its derivatives.
+// For analytic models (e.g. m²ϕ²), customize `analytic_potential` and its derivative.
+// For numerical models, potential values are interpolated from tabulated data.
 
 #include "main.h"
 
-#if numerical_potential
+#if !numerical_potential
+// -------------------------------------------------------------
+// Analytic potential (default: quadratic V(ϕ) = ½ m²ϕ²)
+// -------------------------------------------------------------
 
-// Computes the total potential energy on the lattice
-float potential_energy()
-{
-  DECLARE_INDICES
-  int l;
-  float potential=0.;
-  // Loop over grid to calculate potential term
-  LOOP
-  {
-    l=lstart[i][j][k];
-    while(field_numerical[l] >= f[i][j][k])
-    l++;
-    
-    if (field_numerical[l-1] < f[i][j][k])
-    {
-      printf("Interpolation Error \n");
-      exit(1);
-    }
-    
-    potential += (potential_numerical[l]+(f[i][j][k]-field_numerical[l])*(potential_numerical[l-1]-potential_numerical[l])/(field_numerical[l-1]-field_numerical[l]))/pw2(rescale_B);
-    
-    lstart[i][j][k] = l-int_err;
-  }
-  potential /= gridsize;
-  
-  return (potential);
+float analytic_potential(float field_value) {
+    return 0.5 * m2 * pw2(field_value) / pw2(rescale_B);
 }
 
-float pot_ratio(int i, int j, int k)
-{
-  // This function is needed for the deltaN calculation
-  int l;
-  
-  float pot;
-  float pot_deriv;
-  
-  l=lstart[i][j][k];
-  
-  while(field_numerical[l] >= f[i][j][k])
-  l++;
-  
-  if (field_numerical[l-1] < f[i][j][k])
-  {
-    printf("Interpolation Error \n");
-    
-    exit(1);
-  }
-  
-  pot = potential_numerical[l]+(f[i][j][k]-field_numerical[l])*(potential_numerical[l-1]-potential_numerical[l])/(field_numerical[l-1]-field_numerical[l]);
-  pot_deriv = potential_derivative_numerical[l]+(f[i][j][k]-field_numerical[l])*(potential_derivative_numerical[l-1]-potential_derivative_numerical[l])/(field_numerical[l-1]-field_numerical[l]);
-  
-  lstart[i][j][k] = l-int_errN;
-  
-  return pot_deriv/pot;
+float analytic_potential_derivative(float field_value) {
+    return field_value * m2 / pw2(rescale_B);
 }
-
-float dvdf(int i, int j, int k)
-{
-  int l = lstart[i][j][k];
-  while(field_numerical[l] >= f[i][j][k])
-  l++;
-  return (potential_derivative_numerical[l]+(f[i][j][k]-field_numerical[l])*(potential_derivative_numerical[l-1]-potential_derivative_numerical[l])/(field_numerical[l-1]-field_numerical[l]))/pw2(rescale_B);
-}
-
-// Computes the homogeneous potential energy for a single field value (used during initialization)
-float potential_energy_hom(float field_value)
-{
-  int l=0;
-  while(field_numerical[l] >= field_value)
-  l++;
-  
-  return (potential_numerical[l]+(field_value-field_numerical[l])*(potential_numerical[l-1]-potential_numerical[l])/(field_numerical[l-1]-field_numerical[l]))/pw2(rescale_B);
-}
-
-#else
-
-// Computes the total potential energy on the lattice
-float potential_energy()
-{
-  DECLARE_INDICES
-  float potential=0.;
-  // Loop over grid to calculate potential term (without parallelization)
-  LOOP
-  potential += .5*m2*pw2(f[i][j][k])/pw2(rescale_B);
-  
-  potential /= gridsize;
-  
-  return (potential);
-}
-
-float pot_ratio(int i, int j, int k)
-{
-  // This function is needed for the deltaN calculation
-  
-  float pot=.5*m2*pw2(f[i][j][k])/pw2(rescale_B);;
-  float pot_deriv=dvdf(i,j,k);
-  
-  return pot_deriv/pot;
-}
-
-float dvdf(int i, int j, int k)
-{
-  return f[i][j][k]*m2/pw2(rescale_B);
-}
-
-// Computes the homogeneous potential energy for a single field value (used during initialization)
-float potential_energy_hom(float field_value)
-{
-  return (.5*m2*pw2(field_value)/pw2(rescale_B));
-}
-
 #endif
+
+// Nothing to customize in the following functions
+
+// -------------------------------------------------------------
+// Return the potential V(ϕ) at a given field value (interpolated or analytic)
+// -------------------------------------------------------------
+float potential(float field_value) {
+#if numerical_potential
+    int l = 0;
+    while (field_numerical[l] >= field_value)
+        l++;
+
+    return (
+        potential_numerical[l] +
+        (field_value - field_numerical[l]) *
+        (potential_numerical[l - 1] - potential_numerical[l]) /
+        (field_numerical[l - 1] - field_numerical[l])
+    ) / pw2(rescale_B);
+#else
+    return analytic_potential(field_value);
+#endif
+}
+
+// -------------------------------------------------------------
+// Return ∂V/∂ϕ at a grid point (interpolated or analytic)
+// -------------------------------------------------------------
+float potential_derivative(int i, int j, int k) {
+#if numerical_potential
+    int l = lstart[i][j][k];
+    while (field_numerical[l] >= f[i][j][k])
+        l++;
+
+    return (
+        potential_derivative_numerical[l] +
+        (f[i][j][k] - field_numerical[l]) *
+        (potential_derivative_numerical[l - 1] - potential_derivative_numerical[l]) /
+        (field_numerical[l - 1] - field_numerical[l])
+    ) / pw2(rescale_B);
+#else
+    return analytic_potential_derivative(f[i][j][k]);
+#endif
+}
+
+// -------------------------------------------------------------
+// Compute the total potential energy on the grid
+// -------------------------------------------------------------
+float potential_energy() {
+    DECLARE_INDICES
+    float pot = 0.0;
+
+#if numerical_potential
+    int l;
+    LOOP {
+        l = lstart[i][j][k];
+        while (field_numerical[l] >= f[i][j][k])
+            l++;
+
+        if (field_numerical[l - 1] < f[i][j][k]) {
+            printf("Interpolation Error\n");
+            exit(1);
+        }
+
+        pot += (
+            potential_numerical[l] +
+            (f[i][j][k] - field_numerical[l]) *
+            (potential_numerical[l - 1] - potential_numerical[l]) /
+            (field_numerical[l - 1] - field_numerical[l])
+        ) / pw2(rescale_B);
+
+        lstart[i][j][k] = l - int_err;
+    }
+#else
+    LOOP {
+        pot += potential(f[i][j][k]);
+    }
+#endif
+
+    pot /= gridsize;
+    return pot;
+}
+
+// -------------------------------------------------------------
+// Compute ∂V/∂ϕ divided by V at a grid point
+// Used in δN evolution
+// -------------------------------------------------------------
+float pot_ratio(int i, int j, int k) {
+#if numerical_potential
+    int l = lstart[i][j][k];
+    while (field_numerical[l] >= f[i][j][k])
+        l++;
+
+    if (field_numerical[l - 1] < f[i][j][k]) {
+        printf("Interpolation Error\n");
+        exit(1);
+    }
+
+    float pot = (
+        potential_numerical[l] +
+        (f[i][j][k] - field_numerical[l]) *
+        (potential_numerical[l - 1] - potential_numerical[l]) /
+        (field_numerical[l - 1] - field_numerical[l])
+    );
+
+    float pot_deriv = (
+        potential_derivative_numerical[l] +
+        (f[i][j][k] - field_numerical[l]) *
+        (potential_derivative_numerical[l - 1] - potential_derivative_numerical[l]) /
+        (field_numerical[l - 1] - field_numerical[l])
+    );
+
+    lstart[i][j][k] = l - int_errN;
+#else
+    float pot = potential(f[i][j][k]);
+    float pot_deriv = potential_derivative(i, j, k);
+#endif
+
+    return pot_deriv / pot;
+}

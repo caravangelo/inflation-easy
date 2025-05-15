@@ -13,12 +13,12 @@ char name_[550]; // Filenames - set differently by each function to open output 
 // Zeroes out a mode and its derivative (used when applying a cutoff)
 void kill_mode(float *field, float *deriv)
 {
-  
+
   field[0] = 0.;
   field[1] = 0.;
   deriv[0] = 0.;
   deriv[1] = 0.;
-  
+
   return;
 }
 
@@ -29,7 +29,7 @@ void meansvars(int flush)
   DECLARE_INDICES
 
   double av,var,vel;
-  
+
   static int first=1;
   if(first) // Open output files
   {
@@ -41,7 +41,7 @@ void meansvars(int flush)
     velocity_=fopen(name_,mode_);
     first=0;
   }
-  
+
   fprintf(means_,"%f",t);
   fprintf(means_," %e",t*a);
   fprintf(means_," %e",a);
@@ -49,7 +49,7 @@ void meansvars(int flush)
   fprintf(velocity_," %e",t*a);
   fprintf(velocity_," %e",a);
   fprintf(vars_,"%f",t);
-  
+
   av=0.;
   vel=0.;
   var=0.;
@@ -61,10 +61,10 @@ void meansvars(int flush)
     var += pw2(f[i][j][k]);
   }
   av = av/(double)gridsize; // Convert sum to average
-  vel = vel/(double)gridsize; 
-  
+  vel = vel/(double)gridsize;
+
   vel = vel*pow(a,rescale_s-1)*rescale_B;
-  
+
   fprintf(means_," %e",av);
   fprintf(velocity_," %e",vel);
   fprintf(vars_," %e",var);
@@ -77,7 +77,7 @@ void meansvars(int flush)
     fflush(vars_);
     exit(1);
   }
-  
+
   fprintf(means_,"\n");
   fprintf(vars_,"\n");
   fprintf(velocity_,"\n");
@@ -93,7 +93,7 @@ void meansvars(int flush)
 void scale(int flush)
 {
   static FILE *sf_;
-  
+
   static int first=1;
   if(first) // Open output files
   {
@@ -101,7 +101,7 @@ void scale(int flush)
     sf_=fopen(name_,mode_);
     first=0;
   }
-  
+
   // Output a, H, and adotdot in physical units using rescalings
   fprintf(sf_,"%f %f %e %e\n",t,a,ad*rescale_B*pow(a,rescale_s-2.),pw2(rescale_B)*pow(a,2.*rescale_s-2)*(ad2+(rescale_s-1.)*pw2(ad)/a));
   if(flush)
@@ -121,34 +121,34 @@ void spectraf()
   float fp2; // Square magnitude of field (fp2) and derivative (fpd2) for a given mode
   int i,j,k,px,py,pz,iconj,jconj; // px, py, and pz are components of momentum in units of grid spacing
   float norm1=pow(L/rescale_B,3)/pow(N,6);//normalization to go to reduced planck mass units instead of program units
-  
+
   int arraysize[]={N,N,N}; // Array of grid size in all dimensions - used by FFT routine
-  
+
   static int first=1;
   if(first) // Open output files
   {
-    
+
     snprintf(name_, sizeof(name_), "results/spectra%s",ext_);
     spectra_=fopen(name_,mode_);
-    
+
     snprintf(name_, sizeof(name_), "results/spectratimes%s",ext_);
     spectratimes_=fopen(name_,mode_);
     first=0;
-    
+
   }
-  
+
   // Calculate magnitude of momentum in each bin
   for(i=0;i<numbins;i++)
   p[i]=dp*i;
-  
+
   for(i=0;i<numbins;i++) // Initialize all bins to 0
   {
     numpoints[i]=0; // Number of points in the bin
     f2[i]=0.; // |f_p|^2
   }
-  
+
   fftrn((float *)f,(float *)fnyquist_p,3,arraysize,1); // Transform field values to Fourier space
-  
+
   // Loop runs over all gridpoints. All points with k<N/2 are in the array f, while points with k=N/2 are in the array fnyquist.
   // px and py go over all mode values in wrap-around order, rising from 0 to N/2 and then from -N/2+1 to -1
   for(i=0;i<N;i++)
@@ -194,7 +194,9 @@ void spectraf()
     fprintf(spectra_,"%e %d %e\n",
     p[i],numpoints[i],norm1*f2[i]);
   }
-  
+
+  if(high_cutoff_index>0)
+  {
   if(forcing_cutoff)
   {
     ////////////////// FORCING PART
@@ -206,7 +208,7 @@ void spectraf()
       for(j=0;j<N;j++)
       {
         py=(j<=N/2 ? j : j-N); // y-component of momentum of modes at y=j
-        
+
         // Set all modes with 0<k<N/2. The complex conjugates of these modes do not need to be set.
         for(k=1;k<N/2;k++)
         {
@@ -218,69 +220,69 @@ void spectraf()
             kill_mode(&f[i][j][2*k],&fd[i][j][2*k]);
           }
         }
-        
+
         // Set modes with k=0 or N/2.
         if(j>N/2 || (i>N/2 && (j==0 || j==N/2))) // The complex conjugates of these modes appear explicitly on the lattice and must be set to satisfy f(-p)=f(p)*
         {
           jconj=(j==0 ? 0 : N-j); // Index where complex conjugates of modes at y=j are stored
           // k=0
-          
+
           pdisc=sqrt(pw2(px)+pw2(py));
           if(pdisc>high_cutoff_index || pdisc<low_cutoff_index)
           {
-            
+
             // Zeroes out a mode and its derivative (used when applying a cutoff)
             kill_mode(&f[i][j][0],&fd[i][j][0]);
-            
+
             f[iconj][jconj][0]=f[i][j][0]; // Set complex conjugate mode
             f[iconj][jconj][1]=-f[i][j][1];
             fd[iconj][jconj][0]=fd[i][j][0];
             fd[iconj][jconj][1]=-fd[i][j][1];
-            
+
           }//end if
           // k=N/2
           pdisc=sqrt(pw2(px)+pw2(py)+pw2(N/2.));
           if(pdisc>high_cutoff_index || pdisc>low_cutoff_index)
           {
-            
+
             // Zeroes out a mode and its derivative (used when applying a cutoff)
             kill_mode(&fnyquist_p[i][2*j],&fdnyquist_p[i][2*j]);
-            
+
             fnyquist_p[iconj][2*jconj]=fnyquist_p[i][2*j]; // Set complex conjugate mode
             fnyquist_p[iconj][2*jconj+1]=-fnyquist_p[i][2*j+1];
             fdnyquist_p[iconj][2*jconj]=fdnyquist_p[i][2*j];
             fdnyquist_p[iconj][2*jconj+1]=-fdnyquist_p[i][2*j+1];
-            
+
           }//endif
         }
         else if((i==0 || i==N/2) && (j==0 || j==N/2)) // The 8 "corners" of the lattice are set to real values
         {
-          
+
           pdisc=sqrt(pw2(px)+pw2(py));
           if(pdisc>high_cutoff_index || pdisc>low_cutoff_index) // Don't set the zeromode here (see below)
           {
-            
+
             // Zeroes out a mode and its derivative (used when applying a cutoff)
             kill_mode(&f[i][j][0],&fd[i][j][0]);
-            
+
           }
-          
+
           pdisc=sqrt(pw2(px)+pw2(py)+pw2(N/2.));
-          
+
           if(pdisc>high_cutoff_index || pdisc>low_cutoff_index)
           {
             // Zeroes out a mode and its derivative (used when applying a cutoff)
             kill_mode(&fnyquist_p[i][2*j],&fdnyquist_p[i][2*j]);
-            
+
           }
         }
       } // End of loop over j (y-index on lattice)
     } // End of loop over i (x-index on lattice)
     fftrn((float *)fd,(float *)fdnyquist_p,3,arraysize,-1);
   }
-  
+  }
   fftrn((float *)f,(float *)fnyquist_p,3,arraysize,-1);
-  
+
   fprintf(spectra_,"\n");
   fflush(spectra_);
   fprintf(spectratimes_,"%f",t); // Output time at which power spectra were recorded
@@ -288,7 +290,7 @@ void spectraf()
   fprintf(spectratimes_," %e",a); // Output time at which power spectra were recorded
   fprintf(spectratimes_,"\n"); // Output time at which power spectra were recorded
   fflush(spectratimes_);
-  
+
   return;
 }
 
@@ -305,18 +307,18 @@ void get_modes()
   float pmagnitude,pphysical; // Total momentum (p) in units of lattice spacing, pmagnitude = Sqrt(px^2+py^2+pz^2). This also gives the bin index since bin spacing is set to equal lattice spacing.
   int i,j,k,px,py,pz; // px, py, and pz are components of momentum in units of grid spacing
   float norm1=rescale_B;
-  
+
   static int first=1;
   if(first) // Open output files
   {
-    
+
     snprintf(name_, sizeof(name_), "results/modes%s",ext_);
     modes_=fopen(name_,mode_);
-    
+
     first=0;
-    
+
   }
-  
+
   for(i=0;i<numbins;i++) // Initialize all bins to 0
   {
     numpoints[i]=0; // Number of points in the bin
@@ -345,7 +347,7 @@ void get_modes()
         pz=k;
         pmagnitude=sqrt(pw2(px)+pw2(py)+pw2(pz));
         pphysical=sqrt(4.*pw2(N/L)*(pw2(sin(px*pi/N))+pw2(sin(py*pi/N))+pw2(sin(pz*pi/N))));
-        
+
         numpoints[(int)pmagnitude]++; // Iterate the count of points in this bin
         p_phys[(int)pmagnitude] += pphysical; // Add the power of this mode to the bin
       }
@@ -360,10 +362,10 @@ void get_modes()
     // Output the momentum, number of points, omega, and calculated spectra for each bin
     fprintf(modes_,"%e\n",norm1*p_phys[i]);
   }
-  
+
   fprintf(modes_,"\n");
   fflush(modes_);
-  
+
   return;
 }
 
@@ -387,39 +389,39 @@ void bispectraf()
   float norm1=pow(L/rescale_B,6)/pow(N,9);
   int arraysize[]={N,N,N}; // Array of grid size in all dimensions - used by FFT routine
   float kf;
-  
+
   LOOP
   mean += f[i][j][k];
-  
+
   mean = mean/(float)gridsize;
-  
+
   LOOP
   f[i][j][k] -= mean;
-  
+
   static int first=1;
   if(first) // Open output files
   {
-    
+
     snprintf(name_, sizeof(name_), "results/bispectra%s",ext_);
     bispectra_=fopen(name_,mode_);
-    
+
     first=0;
-    
+
   }
-  
+
   // Calculate magnitude of momentum in each bin
   for(k=0;k<numbins;k++)
   p[k]=dp*k;
-  
+
   for(k=0;k<numbins;k++) // Initialize all bins to 0
   {
     numpoints[k]=0; // Number of points in the bin
     bisreal[k]=0.; // |f_p|^2
     bisimag[k]=0.; // |f_p|^2
   }
-  
+
   fftrn((float *)f,(float *)fnyquist_p,3,arraysize,1); // Transform field values to Fourier space
-  
+
   for(k=0;k<numbins;k++)
   {
     kf = k;
@@ -443,7 +445,7 @@ void bispectraf()
     px3 = px1 + px2;
     py3 = py1 + py2;
     k3 = k1 + k2;
-    
+
     if(px3 <= N/2 and px3 > -N/2  and py3 <= N/2 and py3 > -N/2)
     {//if in lattice
     i3=(px3>=0 ? px3 : px3+N);
@@ -474,11 +476,11 @@ void bispectraf()
       }
       if(k1 != (int)N/2 and k2 != (int)N/2 and (k1 != 0 or k2 != 0))
       counts = 2.;
-      
+
       numpoints[k] += counts;
       bisreal[k] += counts*(f1r*f2r*f3r-f1i*f2i*f3r+f1i*f2r*f3i+f2i*f1r*f3i);
       bisimag[k] += counts*(-f1r*f2r*f3i+f1i*f2i*f3i+f1i*f2r*f3r+f2i*f1r*f3r);
-      
+
     }//ifpzaus3 part 1
     if(k1 != 0 && k2!= 0)
     {
@@ -488,14 +490,14 @@ void bispectraf()
       {
         i2n=(-px2 >=0 ? -px2 : -px2+N);
         j2n=(-py2 >=0 ? -py2 : -py2+N);
-        
+
         f1r = f[i1][j1][2*k1];
         f1i = f[i1][j1][2*k1+1];
         f2r = f[i2n][j2n][2*k2];
         f2i = -f[i2n][j2n][2*k2+1];
         f3r = f[i3][j3][2*k3];
         f3i = f[i3][j3][2*k3+1];
-        
+
         if( k1 == int(N/2))
         {
           f1r = fnyquist_p[i1][2*j1];
@@ -511,13 +513,13 @@ void bispectraf()
           f3r = fnyquist_p[i3][2*j3];
           f3i = fnyquist_p[i3][2*j3+1];
         }
-        
+
         numpoints[k] += 2.;
         bisreal[k] += 2.*(f1r*f2r*f3r-f1i*f2i*f3r+f1i*f2r*f3i+f2i*f1r*f3i);
         bisimag[k] += 2.*(-f1r*f2r*f3i+f1i*f2i*f3i+f1i*f2r*f3r+f2i*f1r*f3r);
-        
+
       }//ifpzaus3 part 2
-      
+
     }//if k1 and k2 neq0
   }//endif inda lattice
 }//if triangleapprox2
@@ -627,7 +629,7 @@ fflush(snapshots_2d_phidot_);
 void energy()
 {
 static FILE *energy_,*conservation_;
-float deriv_energy,grad_energy,pot_energy; 
+float deriv_energy,grad_energy,pot_energy;
 
 float totalE =0.;
 static int first=1;
@@ -649,17 +651,17 @@ fprintf(energy_," %e",a);
 
 deriv_energy = kin_energy(); // Extra terms account for model-dependent rescalings
 totalE += deriv_energy;
-fprintf(energy_," %e",deriv_energy);
+fprintf(energy_," %e",deriv_energy*rescale_B);
 
 // Calculate and output gradient energy
 
 grad_energy=gradient_energy();
 totalE += grad_energy;
-fprintf(energy_," %e",grad_energy);
+fprintf(energy_," %e",grad_energy*rescale_B);
 
 pot_energy = potential_energy(); // Model dependent function for calculating potential energy terms
 totalE += pot_energy;
-fprintf(energy_," %e",pot_energy);
+fprintf(energy_," %e",pot_energy*rescale_B);
 
 fprintf(energy_,"\n");
 fflush(energy_);
@@ -719,7 +721,7 @@ return;
 
 void histograms()
 {
-static FILE *histogram_,*histogram_squared_,*histogramtimes_;
+static FILE *histogram_,*histogramtimes_;
 int i=0,j=0,k=0;
 int binnum; // Index of bin for a given field value
 float binfreq[nbins]; // The frequency of field values occurring within each bin
@@ -733,9 +735,6 @@ if(first) // Open output files
 snprintf(name_, sizeof(name_), "results/histogram%s",ext_);
 histogram_=fopen(name_,mode_);
 
-snprintf(name_, sizeof(name_), "results/histogram_squared%s",ext_);
-histogram_squared_=fopen(name_,mode_);
-
 snprintf(name_, sizeof(name_), "results/histogramtimes%s",ext_);
 histogramtimes_=fopen(name_,mode_);
 first=0;
@@ -745,9 +744,6 @@ fprintf(histogramtimes_,"%f",t); // Output time at which histograms were recorde
 fprintf(histogramtimes_," %f",t*a);
 fprintf(histogramtimes_," %e",a);
 
-// Find the minimum and maximum values of the field
-if(histogram_max==histogram_min) // If no explicit limits are given use the current field values
-{
 i=0;j=0;k=0;
 bmin=f[i][j][k];
 bmax=bmin;
@@ -755,12 +751,6 @@ LOOP
 {
 bmin = ((f[i][j][k])<bmin ? (f[i][j][k]) : bmin);
 bmax = ((f[i][j][k])>bmax ? (f[i][j][k]) : bmax);
-}
-}
-else
-{
-bmin=histogram_min;
-bmax=histogram_max;
 }
 
 // Find the difference (in field value) between successive bins
@@ -794,50 +784,6 @@ fprintf(histogramtimes_," %e %e",bmin,df); // Output the starting point and step
 
 fprintf(histogramtimes_,"\n");
 fflush(histogramtimes_);
-
-if(histogram_max==histogram_min) // If no explicit limits are given use the current field values
-{
-i=0;j=0;k=0;
-bmin=pw2(f[i][j][k]);
-bmax=bmin;
-LOOP
-{
-bmin = (pw2(f[i][j][k])<bmin ? pw2(f[i][j][k]) : bmin);
-bmax = (pw2(f[i][j][k])>bmax ? pw2(f[i][j][k]) : bmax);
-}
-}
-else
-{
-bmin=histogram_min;
-bmax=histogram_max;
-}
-
-// Find the difference (in field value) between successive bins
-df=(bmax-bmin)/(float)(nbins); // bmin will be at the bottom of the first bin and bmax at the top of the last
-
-// Initialize all frequencies to zero
-for(i=0;i<nbins;i++)
-binfreq[i]=0.;
-
-// Iterate over grid to determine bin frequencies
-numpts=0;
-LOOP
-{
-binnum=(int)((pw2(f[i][j][k])-bmin)/df); // Find index of bin for each value
-if(pw2(f[i][j][k])==bmax) // The maximal field value is at the top of the highest bin
-binnum=nbins-1;
-if(binnum>=0 && binnum<nbins) // Increment frequency in the appropriate bin
-{
-binfreq[binnum]++;
-numpts++;
-}
-} // End of loop over grid
-
-// Output results
-for(i=0;i<nbins;i++)
-fprintf(histogram_squared_,"%e\n",binfreq[i]/(float)numpts); // Output bin frequency normalized so the total equals 1
-fprintf(histogram_squared_,"\n"); // Stick a blank line between times to make the file more readable
-fflush(histogram_squared_);
 }
 
 #if perform_deltaN
@@ -855,29 +801,29 @@ void spectraN()
   int i,j,k,px,py,pz; // px, py, and pz are components of momentum in units of grid spacing
   float norm1=pow(L/rescale_B,3)/pow(N,6);
   int arraysize[]={N,N,N}; // Array of grid size in all dimensions - used by FFT routine
-  
+
   static int first=1;
   if(first) // Open output files
   {
-    
+
     snprintf(name_, sizeof(name_), "results/spectraN%s",ext_);
     spectraN_=fopen(name_,mode_);
     first=0;
-    
+
   }
-  
+
   // Calculate magnitude of momentum in each bin
   for(i=0;i<numbins;i++)
   p[i]=dp*i;
-  
+
   for(i=0;i<numbins;i++) // Initialize all bins to 0
   {
     numpoints[i]=0; // Number of points in the bin
     f2[i]=0.; // |f_p|^2
   }
-  
+
   fftrn((float *)deltaN,(float *)fnyquist_p,3,arraysize,1); // Transform field values to Fourier space
-  
+
   // Loop runs over all gridpoints. All points with k<N/2 are in the array f, while points with k=N/2 are in the array fnyquist.
   // px and py go over all mode values in wrap-around order, rising from 0 to N/2 and then from -N/2+1 to -1
   for(i=0;i<N;i++)
@@ -923,12 +869,12 @@ void spectraN()
     fprintf(spectraN_,"%e %d %e\n",
     p[i],numpoints[i],norm1*f2[i]);
   }
-  
+
   fftrn((float *)deltaN,(float *)fnyquist_p,3,arraysize,-1);
-  
+
   fprintf(spectraN_,"\n");
   fflush(spectraN_);
-  
+
   return;
 }
 
@@ -1007,8 +953,6 @@ fprintf(histogramtimesN_," %f",t*a);
 fprintf(histogramtimesN_," %e",a);
 
 // Find the minimum and maximum values of the field
-if(histogram_max==histogram_min) // If no explicit limits are given use the current field values
-{
 i=0;j=0;k=0;
 bmin=deltaN[i][j][k];
 bmax=bmin;
@@ -1016,12 +960,6 @@ LOOP
 {
 bmin = ((deltaN[i][j][k])<bmin ? (deltaN[i][j][k]) : bmin);
 bmax = ((deltaN[i][j][k])>bmax ? (deltaN[i][j][k]) : bmax);
-}
-}
-else
-{
-bmin=histogram_min;
-bmax=histogram_max;
 }
 
 // Find the difference (in field value) between successive bins
@@ -1075,44 +1013,44 @@ void spectraLOG()
   static int first=1;
   if(first) // Open output files
   {
-    
+
     snprintf(name_, sizeof(name_), "results/spectraLOG%s",ext_);
     spectraLOG_=fopen(name_,mode_);
     first=0;
-    
+
   }
-  
+
   // Calculate magnitude of momentum in each bin
   for(i=0;i<numbins;i++)
   p[i]=dp*i;
-  
+
   for(i=0;i<numbins;i++) // Initialize all bins to 0
   {
     numpoints[i]=0; // Number of points in the bin
     f2[i]=0.; // |f_p|^2
   }
-  
+
   float factt=0.;
   float fmean=0.;
-  
+
   LOOP
   {
     factt += fd[i][j][k]*pow(a,rescale_s-1)/(ad*pow(a,rescale_s-2.));
     fmean += f[i][j][k];
   }
-  
+
   factt = factt/(double)gridsize; // Convert sum to average
   fmean = fmean/(double)gridsize; // Convert sum to average
-  
+
   LOOP
   {
     deltaN[i][j][k]=0;
-    if( (1+0.5*(f[i][j][k]-fmean)/factt)>0 )
-    deltaN[i][j][k]=-2*log(1+0.5*(f[i][j][k]-fmean)/factt);
+    if( (1-eta_log*(f[i][j][k]-fmean)/factt)>0 )
+    deltaN[i][j][k]=eta_log*log(1-eta_log*(f[i][j][k]-fmean)/factt);
   }
-  
+
   fftrn((float *)deltaN,(float *)fnyquist_p,3,arraysize,1); // Transform field values to Fourier space
-  
+
   // Loop runs over all gridpoints. All points with k<N/2 are in the array f, while points with k=N/2 are in the array fnyquist.
   // px and py go over all mode values in wrap-around order, rising from 0 to N/2 and then from -N/2+1 to -1
   for(i=0;i<N;i++)
@@ -1158,12 +1096,12 @@ void spectraLOG()
     fprintf(spectraLOG_,"%e %d %e\n",
     p[i],numpoints[i],norm1*f2[i]);
   }
-  
+
   fftrn((float *)deltaN,(float *)fnyquist_p,3,arraysize,-1);
-  
+
   fprintf(spectraLOG_,"\n");
   fflush(spectraLOG_);
-  
+
   return;
 }
 
@@ -1205,24 +1143,16 @@ fprintf(histogramtimesLOG_," %f",t*a);
 fprintf(histogramtimesLOG_," %e",a);
 
 // Find the minimum and maximum values of the field
-if(histogram_max==histogram_min) // If no explicit limits are given use the current field values
-{
 i=0;j=0;k=0;
 bmin=deltaN[i][j][k];
 bmax=bmin;
 LOOP
 {
-if( (1+0.5*(f[i][j][k]-fmean)/factt)>0 )
+if( (1-eta_log*(f[i][j][k]-fmean)/factt)>0 )
 {
 bmin = ((deltaN[i][j][k])<bmin ? (deltaN[i][j][k]) : bmin);
 bmax = ((deltaN[i][j][k])>bmax ? (deltaN[i][j][k]) : bmax);
 }
-}
-}
-else
-{
-bmin=histogram_min;
-bmax=histogram_max;
 }
 
 // Find the difference (in field value) between successive bins
@@ -1303,7 +1233,7 @@ return;
 }
 
 // Calculate and save quantities (means, variances, etc.). If force>0 all infrequent calculations will be performed
-void save(int infrequent, int last)
+void save(int infrequent)
 {
 
 if(t>0.) // Synchronize field values and derivatives. There's a special case at t=0 when fields and derivatives should stay synchronized
@@ -1331,7 +1261,11 @@ if(output_histogram)
 histograms();
 }
 
-if(last)
+if(t>0.) // Desynchronize field values and derivatives (for leapfrog)
+evolve_fields(.5*dt*pow(astep,rescale_s-1));
+}
+
+void save_last()
 {
 get_modes();
 if(output_bispectrum)
@@ -1346,9 +1280,6 @@ histogramsLOG();
 #endif
 }
 
-if(t>0.) // Desynchronize field values and derivatives (for leapfrog)
-evolve_fields(.5*dt*pow(astep,rescale_s-1));
-}
 #if perform_deltaN
 void saveN()
 {
@@ -1360,7 +1291,7 @@ float Nmean=0;
 DECLARE_INDICES
 LOOP
 {
-if(deltaN[i][j][k] <= (Nend-dN))
+if(deltaN[i][j][k] <= (Nend-dN)) // This is done to remove trapped patches from the mean.
 Nmean += deltaN[i][j][k];
 }
 Nmean=Nmean/gridsize;

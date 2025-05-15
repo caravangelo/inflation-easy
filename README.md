@@ -2,6 +2,8 @@
 
 **InflationEasy** is a C++ program designed to simulate single-field inflation on a lattice. It is inspired by and partially adapted from [LATTICEEASY](http://www.felderbooks.com/latticeeasy/) by Gary Felder and Igor Tkachev.
 
+More information can be found in the associated publication: [arXiv:?????](https://arxiv.org/abs/????).
+
 ## Key Features
 
 - **Lattice-Based Simulation:** Evolves a scalar field on a discrete lattice in an expanding universe.
@@ -103,12 +105,15 @@ The notebook loads output files from the `results/` directory and generates basi
 
 ## Citing This Work
 
-If you use InflationEasy in your research, please cite the following papers, where this code was developed and tested:
+If you use InflationEasy in your research, please cite the associated publication: [arXiv:?????](https://arxiv.org/abs/????).
+
+The following papers, where InflationEasy was developed and tested, are also relevant sources:
 
 - [arXiv:2102.06378](https://arxiv.org/abs/2102.06378)
 - [arXiv:2209.13616](https://arxiv.org/abs/2209.13616)
 - [arXiv:2403.12811](https://arxiv.org/abs/2403.12811)
 - [arXiv:2410.23942](https://arxiv.org/abs/2410.23942)
+- [arXiv:????](https://arxiv.org/abs/????)
 
 ## License
 

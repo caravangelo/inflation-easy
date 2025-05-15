@@ -9,8 +9,8 @@ dt=0.001000, dt/dx=0.012800
 rescale_s=0.000000
 rescale_B=5.477226e-05
 
-Run began at Tue May  6 15:45:48 2025
-Run ended at Tue May  6 16:13:11 2025
+Run began at Thu May 15 11:57:43 2025
+Run ended at Thu May 15 12:19:23 2025
 
-Run from t=0.000000 to t=6.746772 took 27 minutes, 23 seconds
+Run from t=0.000000 to t=3.746872 took 21 minutes, 40 seconds
 

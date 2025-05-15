@@ -1,9 +1,9 @@
-// main.h - Global variable declarations and shared definitions
-/*
-This file contains the global variable declarations, function declarations,
-and some definitions used in many of the routines. The global variables are
-defined in the file latticeeasy.cpp.
-*/
+// main.h - Global declarations and shared definitions for InflationEasy
+//
+// This header declares global variables, constants, and functions
+// used across the simulation. Global variable definitions are in main.cpp.
+
+#pragma once
 
 #include <time.h>
 #include <stdio.h>
@@ -14,67 +14,105 @@ defined in the file latticeeasy.cpp.
 #include <fstream>
 #include <vector>
 
+// -------------------- Math and Constants --------------------
+
 #define float double
-const float pi = (float)(2.*asin(1.));
-inline float pw2(float x) {return x*x;} // Useful macro for squaring floats
+const float pi = (float)(2. * asin(1.));
+inline float pw2(float x) { return x * x; } // Square of a float
 
-/////////////////////////////////INCLUDE ADJUSTABLE PARAMETERS///////////////////
-#include "parameters.h"
+// -------------------- Simulation Parameters --------------------
 
-/////////////////////////////////GLOBAL DYNAMIC VARIABLES////////////////////////
-extern float t,t0; // Current time and initial time (t0=0 unless the run is a continuation of a previous one)
-extern float astep,a,ad,ad2,aterm,ad0,Ne; // Scale factor and its derivatives (aterm is a combination of the others used in the equations of motion)
-extern float hubble_init; // Initial value of the Hubble constant
+#include "parameters.h" // Adjustable simulation parameters
 
-extern char ext_[500]; // Extension for filenames - set once and used by all functions
-extern char mode_[]; // Mode in which to open files, i.e. write ("w") or append ("a+"). Depends on the variable continue_run and on whether a previous grid image was found.
+// Grid spacing (comoving distance between points)
+const float dx = L / (float)N;
 
-const float dx=L/(float)N; // Distance between adjacent gridpoints
+// Total number of points in the 3D grid
+const int gridsize = N * N * N;
 
-extern float f[N][N][N],fd[N][N][N];
+// -------------------- Global Dynamic Variables --------------------
+
+// Time and scale factor evolution
+extern float t, t0;             // Time and initial time
+extern float astep, a;          // Scale factor and backup (for leapfrog)
+extern float ad, ad2;           // First and second derivatives of scale factor
+extern float aterm;             // Intermediate quantity used in evolution
+extern float Ne;                // e-folding number used in deltaN evolution
+extern float hubble_init;       // Initial Hubble parameter
+
+// Reference field value for deltaN termination
+extern float phiref;
+
+// I/O formatting
+extern char ext_[500];          // Filename extension for outputs
+extern char mode_[];            // File open mode (write/append)
+
+// -------------------- Lattice Fields --------------------
+
+// Main field and its time derivative
+extern float f[N][N][N], fd[N][N][N];
+
 #if perform_deltaN
+// deltaN field for separate evolution
 extern float deltaN[N][N][N];
 #endif
 
-extern float fnyquist_p[N][2*N],fdnyquist_p[N][2*N];
+// Nyquist frequency components for FFT
+extern float fnyquist_p[N][2 * N], fdnyquist_p[N][2 * N];
+
 #if numerical_potential
-extern int lstart[N][N][N];
-extern std::vector<float> field_numerical;
-extern std::vector<float> potential_numerical;
-extern std::vector<float> potential_derivative_numerical;
+// Interpolation for numerical potential
+extern int lstart[N][N][N];                         // Interpolation index grid
+extern std::vector<float> field_numerical;          // Grid of ϕ values
+extern std::vector<float> potential_numerical;      // V(ϕ) values
+extern std::vector<float> potential_derivative_numerical; // dV/dϕ values
 #endif
 
-const int gridsize=N*N*N; // Number of spatial points in the grid
-#define FIELD f[i][j][k]
-#define LOOP for(i=0;i<N;i++) for(j=0;j<N;j++) for(k=0;k<N;k++)
-#define INDEXLIST int i, int j, int k
-#define DECLARE_INDICES int i,j,k;
+// -------------------- Grid Macros --------------------
 
-/////////////////////////////////FUNCTION DECLARATIONS///////////////////////////
-// Initializes the field values and Hubble parameter at the start of the simulation
-void initialize();
-void initializef();
-void initializeN();
-float gradient_energy();
-// Computes the total potential energy on the lattice
-float potential_energy();
-float kin_energy();
+#define FIELD f[i][j][k]                                // Short-hand for f at (i,j,k)
+#define LOOP for(i=0;i<N;i++) for(j=0;j<N;j++) for(k=0;k<N;k++) // Loop over full grid
+#define INDEXLIST int i, int j, int k                   // Function parameter list for indexing
+#define DECLARE_INDICES int i, j, k;                    // Local index variable declarations
 
-void evolve_fields(float d);
-void evolve_scale(float d);
-void evolve_derivs(float d);
+// -------------------- Function Declarations --------------------
 
-void evolve_fieldsN(float d);
-void evolve_derivsN(float d);
+// Initialization
+void initialize();               // Basic parameter checks and hubble_init
+void initializef();              // Generate vacuum fluctuations
+void initializeN();              // Setup for deltaN calculation
+void initialize_simulation();    // Full initialization pipeline
 
-// Computes the homogeneous potential energy for a single field value (used during initialization)
-float potential_energy_hom(float field_value);
-float dvdf(int i,int j, int k);
-float pot_ratio(int i,int j, int k);
+// Field evolution
+void evolve_fields(float d);     // Evolve f with step d
+void evolve_derivs(float d);     // Evolve fd with step d
+void evolve_scale(float d);      // (Unused but present)
+void evolve_fieldsN(float d);    // Evolve f during deltaN run
+void evolve_derivsN(float d);    // Evolve fd during deltaN run
 
-// Outputs the simulation parameters to file for reference
-void output_parameters(); // Output information about the run parameters
-void save(int force, int last); // Calculate and save quantities (means, variances, spectra, etc.)
-void saveN(); // Calculate and save quantities (means, variances, spectra, etc.)
-void fftrn(float f[], float fnyquist[], int ndims, int size[], int forward); // Do a Fourier transform of an ndims dimensional array of real numbers
-void load_vector(const std::string& filename, std::vector<float>& vec);
+// Energies
+float gradient_energy();         // Compute spatial gradient energy
+float kin_energy();              // Compute kinetic energy
+float potential_energy();        // Compute total potential energy on grid
+
+// Potential interface
+float potential(float field_value);                 // V(ϕ) for single value
+float potential_derivative(int i, int j, int k);    // ∂V/∂ϕ at a grid point
+float pot_ratio(int i, int j, int k);               // ∂V/∂ϕ / V
+
+// Output routines
+void output_parameters();       // Write simulation parameters to file
+void save(int force);           // Save observables (means, spectra, etc.)
+void save_last();               // Final snapshot
+void saveN();                   // Save for deltaN evolution
+
+// Utilities
+void fftrn(float f[], float fnyquist[], int ndims, int size[], int forward); // Real FFT
+void load_vector(const std::string& filename, std::vector<float>& vec);      // Read floats from file
+bool ensure_results_directory();                                             // Create output directory if needed
+
+// Main evolution loops
+void run_evolution_loop(FILE* output_);
+#if perform_deltaN
+void run_deltaN_loop(FILE* output_);
+#endif
