@@ -91,7 +91,7 @@ void initialize() {
   printf("Generating initial conditions for new run at t = 0\n");
 
   t0 = 0;
-  hubble_init = sqrt(potential(initfield) / 3.);
+  hubble_init = sqrt(potential(initial_field) / 3.);
 
   if (hubble_init < 0.) {
     printf("Error: Initial Hubble constant is negative or undefined\n");
@@ -111,8 +111,8 @@ void initialize() {
 void initializef() {
   float p2, p2lat, mass_sq = 0;
   float dp2 = pw2(2. * pi / L);
-  float initial_field_values = initfield;
-  float initial_field_derivs = initderivs;
+  float initial_field_values = initial_field;
+  float initial_field_derivs = initial_derivative;
   int i, j, k, iconj, jconj;
   float px, py, pz;
   int arraysize[] = {N, N, N};

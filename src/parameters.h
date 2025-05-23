@@ -1,12 +1,12 @@
 // -------------------- InflationEasy Configuration Flags --------------------
 
-// Use 1 to enable a numerical potential loaded from file, 0 for analytic expression
+// Set to 1 to enable a numerical potential loaded from file, 0 for analytic expression
 #define numerical_potential 1
 
-// Use 1 to perform deltaN evolution to calculate zeta
+// Set to 1 to perform deltaN evolution to calculate zeta
 #define perform_deltaN 1
 
-// Use 1 to parallelize some of the simulation loops using OpenMP
+/// Set to 1 to enable OpenMP parallelism in selected loops (if supported by the compiler)
 #define parallel_calculation 1
 
 #if perform_deltaN
@@ -16,7 +16,7 @@
 
 // -------------------- Lattice and Evolution Parameters --------------------
 
-// Grid resolution (number of points along each spatial dimension)
+// Number of points along each spatial dimension (total lattice points will be N^3)
 const int N = 128; // Must be a power of 2
 
 // Rescaling exponent (must be 0 unless you've tested otherwise)
@@ -33,12 +33,15 @@ const int seed = 8;
 #if numerical_potential
 // Parameters used if the potential is loaded from file
 
-const float V0 = 3e-9; // Potential normalization (used for rescaling)
-const float initfield = 2.9181235049318586; // Initial field value
-const float initderivs = -0.06727651095116181; // Initial field velocity
+const float V0 = 3e-9; // Potential parameter
 const float rescale_B = sqrt(V0); // Field rescaling factor (see doc)
-const float L = 10.; // Comoving box size (must be sub-horizon at start)
+const float initial_field = 2.9181235049318586; // Initial field value
+const float initial_derivative = -0.06727651095116181; // Initial field velocity (in code units)
+const float L = 10.; // Comoving box size in code units (must be sub-horizon at start)
 const float dt = 0.001; // Time step
+// Output frequency in time steps (standard and infrequent quantities)
+const int output_freq = 100;
+const int output_infrequent_freq = 100;
 
 #if perform_deltaN
 const float dN = 0.0001; // e-fold increment in deltaN evolution
@@ -50,15 +53,18 @@ const float Nend = 2.;   // Final e-folding time for deltaN run
 // Parameters used for an analytic potential (defaults are for quadratic potential)
 
 const float m2 = 0.263e-10; // Mass squared for quadratic potential
-const float initfield = 14.5;
-const float initderivs = -0.8154;
 const float rescale_B = sqrt(m2);
-const float L = 1.;
-const float dt = 0.0001;
+const float initial_field = 14.5; // Initial field value
+const float initial_derivative = -0.81529; // Initial field velocity (in code units)
+const float L = 2.; // Comoving box size in code units (must be sub-horizon at start)
+const float dt = 0.00005; // Time step
+// Output frequency in time steps (standard and infrequent quantities)
+const int output_freq = 200;
+const int output_infrequent_freq = 200;
 
 #if perform_deltaN
-const float dN = 0.0000001;
-const float Nend = 0.001;
+const float dN = 0.0000001; // e-fold increment in deltaN evolution
+const float Nend = 0.001; // Final e-folding time for deltaN run
 // const float phiref_manual = value; // (Optional) manually set the reference ϕ value
 #endif
 #endif
@@ -73,10 +79,6 @@ const float low_cutoff_index = 0;
 const int forcing_cutoff = 0;
 
 // -------------------- Output Configuration --------------------
-
-// Output frequency in time steps (standard and infrequent quantities)
-const int output_freq = 100;
-const int output_infrequent_freq = 100;
 
 // Toggle various outputs (1 = enabled)
 const int output_spectra = 1;

@@ -1,113 +1,116 @@
+
 # InflationEasy
 
-**InflationEasy** is a C++ program designed to simulate single-field inflation on a lattice. It is inspired by and partially adapted from [LATTICEEASY](http://www.felderbooks.com/latticeeasy/) by Gary Felder and Igor Tkachev.
+**InflationEasy** is a C++ program designed to simulate single-field inflation on a 3D lattice in an expanding FLRW universe. It is inspired by and partially adapted from [LATTICEEASY](http://www.felderbooks.com/latticeeasy/) by Gary Felder and Igor Tkachev.
 
-More information can be found in the associated publication: [arXiv:?????](https://arxiv.org/abs/????).
+More information is available in the associated publication: [arXiv:?????](https://arxiv.org/abs/????).
 
 ## Key Features
 
 - **Lattice-Based Simulation:** Evolves a scalar field on a discrete lattice in an expanding universe.
 - **Flexible Potential Handling:** Supports both analytical and numerical representations of the inflationary potential.  
-  **Note:** The code runs significantly faster when using an analytical potential.
+  **Note:** The code typically runs faster when using an analytical potential.
 - **OpenMP Parallelization:** Optionally leverages OpenMP for accelerated computation on multi-core systems.
-- **Comprehensive Output:** Generates detailed output including field statistics, background quantities, and power spectra.
+- **Comprehensive Output:** Produces detailed outputs including field statistics, background quantities, and power spectra.
 
 ## Code Structure
 
 ### Source files (`src/`)
-- `main.cpp`: Program entry point; contains the `main` function and global variable declarations.
+- `main.cpp`: Entry point of the program; orchestrates the simulation workflow.
 - `initialize.cpp`: Sets initial field conditions and computes the initial Hubble parameter.
-- `evolution.cpp`: Contains the core algorithms for time evolution of the scalar field.
-- `output.cpp`: Handles writing simulation results and statistics to disk.
-- `potential.cpp`: Defines the inflationary potential, either analytically or from input files.
-- `parameters.h`: Central header for simulation and model parameters.  
-  **Important:** Users should carefully edit this file to configure simulations.
+- `evolution.cpp`: Implements the core algorithm for time evolution of the scalar field.
+- `output.cpp`: Handles writing results to disk, including observables and diagnostics.
+- `potential.cpp`: Defines the inflationary potential, either analytically or via input files.
+- `parameters.h`: Central header file for configuring physical and numerical parameters.  
+  **Important:** Edit this file to configure your simulation setup.
 
 ### Input files (`inputs/`)
-- `field_values.dat`: Field values for the numerical potential.
+These files are only required when using a **numerical potential** (`numerical_potential = 1` in `parameters.h`):
+
+- `field_values.dat`: Field values at which the potential is defined.
 - `potential.dat`: Corresponding potential values.
-- `potential_derivative.dat`: Derivatives of the potential.
+- `potential_derivative.dat`: First derivative of the potential.
+
+Each file should contain a single column of values, one per line. Analytical potentials do not require any input files.
 
 ### Output files (`results/`)
-- Simulation results, logs, spectra, and other diagnostic data are written here.
+- Simulation results, logs, spectra, and other diagnostics are written here.
 
 ### Notebook (`notebooks/`)
-- `plot.ipynb`: A Jupyter notebook providing an example of how to process and visualize the output data.
+- `plot.ipynb`: A Jupyter notebook for post-processing and visualizing simulation outputs.
 
 ## Prerequisites
 
 - A C++17-compliant compiler (e.g., GCC or Clang).
-- (Optional) OpenMP library for parallel execution.
-- (Optional) Python 3 and Jupyter for running the example notebook `plot.ipynb`.
+- (Optional) OpenMP for parallel execution.
+- (Optional) Python 3 and Jupyter for running the notebook.
 
 ## Building the Code
 
-To compile the program, run:
+To compile the program, simply run:
 
 ```bash
 make
 ```
 
-The `Makefile` automatically enables OpenMP if the `parallel_calculation` flag is set to `1` in `parameters.h`. Ensure OpenMP is available on your system if you enable this option.
-
 ## Running the Simulation
 
 ### Input Setup
 
-Two potential options are currently supported:
+Two default potentials are supported:
 
 1. **Numerical potential (default):**  
-   The default setup implements the USR potential described as Case I in [arXiv:2410.23942](https://arxiv.org/abs/2410.23942), with $\mathcal{P}_{\zeta,\text{tree}}^{\text{max}} = 10^{-2}.$
+   Implements the ultra-slow-roll (USR) potential described as Case I in [arXiv:2410.23942](https://arxiv.org/abs/2410.23942), with $\mathcal{P}_{\zeta,	ext{tree}}^{	ext{max}} = 10^{-2}$.
 
-   **Note:** The code is slower when using a numerical potential instead of an analytical potential. If you need a faster code (for example if you are running it on a laptop), use an analytical potential instead.
+   **Note:** This option is slower than the analytical one. For faster runs (e.g., on a laptop), prefer an analytical potential.
 
 2. **Analytical potential:**  
-   A simple quadratic potential $V(\phi) = \frac{1}{2}m^2\phi^2$.  
-   In this case, the (optional) $\delta N$ calculation to obtain the fully nonlinear $\zeta$ (see arXiv:????.?????) is slower and typically unnecessary due to the small amplitude of perturbations.
+   The quadratic potential $V(\phi) = \frac{1}{2}m^2\phi^2$.  
+   In this case, the (optional) $\delta N$ calculation for nonlinear $\zeta$ (see arXiv:????.?????) is typically unnecessary due to the small amplitude of perturbations.
 
-To switch between the two, modify the `numerical_potential` flag in `parameters.h`.
+Switch between these via the `numerical_potential` flag in `parameters.h`.
 
 ### Custom Potentials
 
-To define your own potential:
+To define a custom potential:
 
-- If using an analytical potential, modify the functions in `potential.cpp`.
-- If using a numerical potential, ensure the files `field_values.dat`, `potential.dat`, and `potential_derivative.dat` are placed in the `inputs/` directory. These files must contain one value per line.
-- Adjust relevant parameters in `parameters.h`.
+- For an analytical potential, modify the relevant functions in `potential.cpp`.
+- For a numerical potential, place `field_values.dat`, `potential.dat`, and `potential_derivative.dat` in the `inputs/` directory. These must be one-value-per-line.
+- Adjust physical and numerical parameters in `parameters.h`.
 
-### Executing the Program
+### Running the Code
 
-After compilation, run the program from the terminal:
+After compilation, run the simulation via:
 
 ```bash
 ./inflation_easy
 ```
 
-Simulation output will be written to the `results/` directory. A log of progress is saved to `output.txt`, and additional files contain energy densities, field values, power spectra and other useful statistics.
+Output will appear in the `results/` directory. A runtime log is saved in `output.txt`, along with energy densities, field values, spectra, and more.
 
-All quantities in the simulation are expressed in **reduced Planck units**, where the reduced Planck mass $M_{\mathrm{Pl}}^{\text{red}} = \frac{M_{\mathrm Pl}}{\sqrt{8\pi}} =1$. This means that fundamental constants are set such that $\hbar = c = 1$ and $8\pi G = 1$, simplifying the equations.
+All quantities are given in **reduced Planck units**, where $M_{\mathrm{Pl}}^{\text{red}} = \frac{M_{\mathrm{Pl}}}{\sqrt{8\pi}} = 1$. This sets $\hbar = c = 1$ and $8\pi G = 1$, simplifying the equations.
 
+## Jupyter Notebook
 
-## Processing example with Jupyter
+An example notebook, `plot.ipynb`, is included to help visualize output data.
 
-An example notebook `plot.ipynb` is provided to demonstrate how to read and visualize the simulation output using Python. This is optional, but can be useful for quick data inspection.
+To use it:
 
-To run the notebook:
-
-1. Make sure you have Python 3 and Jupyter installed.
-2. Launch the notebook:
+1. Ensure Python 3 and Jupyter are installed.
+2. Run:
 
 ```bash
 jupyter notebook plot.ipynb
 ```
 
-The notebook loads output files from the `results/` directory and generates basic plots such as background evolution and field statistics.
+The notebook reads data from `results/` and plots quantities like the field evolution and power spectra.
 
 ## Citing This Work
 
-If you use InflationEasy in your research, please cite the associated publication: [arXiv:?????](https://arxiv.org/abs/????).
+If you use *InflationEasy* in your research, please cite the associated code paper:  
+[arXiv:?????](https://arxiv.org/abs/????)
 
-The following papers, where InflationEasy was developed and tested, are also relevant sources:
+Additional references where *InflationEasy* was developed and applied:
 
 - [arXiv:2102.06378](https://arxiv.org/abs/2102.06378)
 - [arXiv:2209.13616](https://arxiv.org/abs/2209.13616)

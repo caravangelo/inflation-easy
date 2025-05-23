@@ -43,12 +43,11 @@ void meansvars(int flush)
   }
 
   fprintf(means_,"%f",t);
-  fprintf(means_," %e",t*a);
   fprintf(means_," %e",a);
   fprintf(velocity_,"%f",t);
-  fprintf(velocity_," %e",t*a);
   fprintf(velocity_," %e",a);
   fprintf(vars_,"%f",t);
+  fprintf(vars_," %e",a);
 
   av=0.;
   vel=0.;
@@ -67,7 +66,7 @@ void meansvars(int flush)
 
   fprintf(means_," %e",av);
   fprintf(velocity_," %e",vel);
-  fprintf(vars_," %e",var);
+  fprintf(vars_," %e",var-pw2(av));
   // Check for instability. See if the field has grown exponentially and become non-numerical at any point.
   if(av+FLT_MAX==av || (av!=0. && av/av!=1.))
   {
@@ -286,9 +285,8 @@ void spectraf()
   fprintf(spectra_,"\n");
   fflush(spectra_);
   fprintf(spectratimes_,"%f",t); // Output time at which power spectra were recorded
-  fprintf(spectratimes_," %e",t*a); // Output time at which power spectra were recorded
-  fprintf(spectratimes_," %e",a); // Output time at which power spectra were recorded
-  fprintf(spectratimes_,"\n"); // Output time at which power spectra were recorded
+  fprintf(spectratimes_," %e",a); // Output scale factor at which power spectra were recorded
+  fprintf(spectratimes_,"\n"); 
   fflush(spectratimes_);
 
   return;
@@ -644,7 +642,6 @@ conservation_=fopen(name_,mode_);
 } // The variable first is used again at the end of the function, where it is then set to 0
 
 fprintf(energy_,"%f",t); // Output time
-fprintf(energy_," %e",t*a);
 fprintf(energy_," %e",a);
 
 // Calculate and output kinetic (time derivative) energy
@@ -741,7 +738,6 @@ first=0;
 }
 
 fprintf(histogramtimes_,"%f",t); // Output time at which histograms were recorded
-fprintf(histogramtimes_," %f",t*a);
 fprintf(histogramtimes_," %e",a);
 
 i=0;j=0;k=0;
@@ -949,7 +945,6 @@ first=0;
 }
 
 fprintf(histogramtimesN_,"%f",t); // Output time at which histograms were recorded
-fprintf(histogramtimesN_," %f",t*a);
 fprintf(histogramtimesN_," %e",a);
 
 // Find the minimum and maximum values of the field
@@ -1139,7 +1134,6 @@ factt = factt/(double)gridsize; // Convert sum to average
 fmean = fmean/(double)gridsize; // Convert sum to average
 
 fprintf(histogramtimesLOG_,"%f",t); // Output time at which histograms were recorded
-fprintf(histogramtimesLOG_," %f",t*a);
 fprintf(histogramtimesLOG_," %e",a);
 
 // Find the minimum and maximum values of the field
@@ -1210,8 +1204,8 @@ fprintf(info_,"General Program Information\n");
 fprintf(info_,"-----------------------------\n");
 fprintf(info_,"Grid size=%d^%d\n",N,3);
 fprintf(info_,"L=%f\n",L);
-fprintf(info_,"f0=%f\n",initfield);
-fprintf(info_,"fd0=%f\n",initderivs);
+fprintf(info_,"f0=%f\n",initial_field);
+fprintf(info_,"fd0=%f\n",initial_derivative);
 fprintf(info_,"dt=%f, dt/dx=%f\n",dt,dt/dx);
 fprintf(info_,"rescale_s=%f\n",rescale_s);
 fprintf(info_,"rescale_B=%e\n",rescale_B);
