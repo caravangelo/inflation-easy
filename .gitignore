@@ -2,7 +2,7 @@
 inflation_easy
 
 # Ignore macOS system files
-.DS_Store
+**/.DS_Store
 __MACOSX/
 
 # Ignore Jupyter checkpoints and workspace metadata
