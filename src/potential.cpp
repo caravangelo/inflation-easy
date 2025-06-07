@@ -8,7 +8,7 @@
 
 #if !numerical_potential
 // -------------------------------------------------------------
-// Analytic potential (default: quadratic V(ϕ) = ½ m²ϕ²)
+// Analytic potential (default: quadratic V(ϕ) = 1/2 m²ϕ²)
 // -------------------------------------------------------------
 
 float analytic_potential(float field_value) {
@@ -47,18 +47,18 @@ float potential(float field_value) {
 // -------------------------------------------------------------
 float potential_derivative(int i, int j, int k) {
 #if numerical_potential
-    int l = lstart[i][j][k];
-    while (field_numerical[l] >= f[i][j][k])
+    int l = lstart[idx(i,j,k)];
+    while (field_numerical[l] >= f[idx(i,j,k)])
         l++;
 
     return (
         potential_derivative_numerical[l] +
-        (f[i][j][k] - field_numerical[l]) *
+        (f[idx(i,j,k)] - field_numerical[l]) *
         (potential_derivative_numerical[l - 1] - potential_derivative_numerical[l]) /
         (field_numerical[l - 1] - field_numerical[l])
     ) / pw2(rescale_B);
 #else
-    return analytic_potential_derivative(f[i][j][k]);
+    return analytic_potential_derivative(f[idx(i,j,k)]);
 #endif
 }
 
@@ -72,27 +72,27 @@ float potential_energy() {
 #if numerical_potential
     int l;
     LOOP {
-        l = lstart[i][j][k];
-        while (field_numerical[l] >= f[i][j][k])
+        l = lstart[idx(i,j,k)];
+        while (field_numerical[l] >= f[idx(i,j,k)])
             l++;
 
-        if (field_numerical[l - 1] < f[i][j][k]) {
+        if (field_numerical[l - 1] < f[idx(i,j,k)]) {
             printf("Interpolation Error\n");
             exit(1);
         }
 
         pot += (
             potential_numerical[l] +
-            (f[i][j][k] - field_numerical[l]) *
+            (f[idx(i,j,k)] - field_numerical[l]) *
             (potential_numerical[l - 1] - potential_numerical[l]) /
             (field_numerical[l - 1] - field_numerical[l])
         ) / pw2(rescale_B);
 
-        lstart[i][j][k] = l - int_err;
+        lstart[idx(i,j,k)] = l - int_err;
     }
 #else
     LOOP {
-        pot += potential(f[i][j][k]);
+        pot += potential(f[idx(i,j,k)]);
     }
 #endif
 
@@ -106,32 +106,32 @@ float potential_energy() {
 // -------------------------------------------------------------
 float pot_ratio(int i, int j, int k) {
 #if numerical_potential
-    int l = lstart[i][j][k];
-    while (field_numerical[l] >= f[i][j][k])
+    int l = lstart[idx(i,j,k)];
+    while (field_numerical[l] >= f[idx(i,j,k)])
         l++;
 
-    if (field_numerical[l - 1] < f[i][j][k]) {
+    if (field_numerical[l - 1] < f[idx(i,j,k)]) {
         printf("Interpolation Error\n");
         exit(1);
     }
 
     float pot = (
         potential_numerical[l] +
-        (f[i][j][k] - field_numerical[l]) *
+        (f[idx(i,j,k)] - field_numerical[l]) *
         (potential_numerical[l - 1] - potential_numerical[l]) /
         (field_numerical[l - 1] - field_numerical[l])
     );
 
     float pot_deriv = (
         potential_derivative_numerical[l] +
-        (f[i][j][k] - field_numerical[l]) *
+        (f[idx(i,j,k)] - field_numerical[l]) *
         (potential_derivative_numerical[l - 1] - potential_derivative_numerical[l]) /
         (field_numerical[l - 1] - field_numerical[l])
     );
 
-    lstart[i][j][k] = l - int_errN;
+    lstart[idx(i,j,k)] = l - int_errN;
 #else
-    float pot = potential(f[i][j][k]);
+    float pot = potential(f[idx(i,j,k)]);
     float pot_deriv = potential_derivative(i, j, k);
 #endif
 

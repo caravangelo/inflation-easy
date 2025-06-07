@@ -8,9 +8,10 @@
 #include <fstream>
 
 // Field values and derivatives
-float f[N][N][N], fd[N][N][N];
+std::vector<float> f;
+std::vector<float> fd;
 #if perform_deltaN
-float deltaN[N][N][N];
+std::vector<float> deltaN;
 #endif
 
 float fnyquist_p[N][2*N], fdnyquist_p[N][2*N];
@@ -22,7 +23,7 @@ char mode_[10] = "w";
 char ext_[500] = ".dat";
 
 #if numerical_potential
-int lstart[N][N][N];
+std::vector<int> lstart;
 std::vector<float> field_numerical;
 std::vector<float> potential_numerical;
 std::vector<float> potential_derivative_numerical;

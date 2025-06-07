@@ -17,39 +17,39 @@ inline int DECREMENT(int i) {
 // -------------------- Laplacians --------------------
 
 // Laplacian of fd used in evolution equations (with edge handling)
-inline float lapld(INDEXLIST) {
+inline float lapld(int i, int j, int k) {
   if (i == 0 || j == 0 || k == 0 || i == N - 1 || j == N - 1 || k == N - 1) {
     return (
-      fd[i][j][INCREMENT(k)] + fd[i][j][DECREMENT(k)] +
-      fd[i][INCREMENT(j)][k] + fd[i][DECREMENT(j)][k] +
-      fd[INCREMENT(i)][j][k] + fd[DECREMENT(i)][j][k] -
-      6. * fd[i][j][k]
+      fd[idx(i,j,INCREMENT(k))] + fd[idx(i,j,DECREMENT(k))] +
+      fd[idx(i,INCREMENT(j),k)] + fd[idx(i,DECREMENT(j),k)] +
+      fd[idx(INCREMENT(i),j,k)] + fd[idx(DECREMENT(i),j,k)] -
+      6. * fd[idx(i,j,k)]
     );
   } else {
     return (
-      fd[i][j][k + 1] + fd[i][j][k - 1] +
-      fd[i][j + 1][k] + fd[i][j - 1][k] +
-      fd[i + 1][j][k] + fd[i - 1][j][k] -
-      6. * fd[i][j][k]
+      fd[idx(i,j,k+1)] + fd[idx(i,j,k-1)] +
+      fd[idx(i,j+1,k)] + fd[idx(i,j-1,k)] +
+      fd[idx(i+1,j,k)] + fd[idx(i-1,j,k)] -
+      6. * fd[idx(i,j,k)]
     );
   }
 }
 
 // Laplacian of f (same structure as above)
-inline float lapl(INDEXLIST) {
+inline float lapl(int i, int j, int k) {
   if (i == 0 || j == 0 || k == 0 || i == N - 1 || j == N - 1 || k == N - 1) {
     return (
-      f[i][j][INCREMENT(k)] + f[i][j][DECREMENT(k)] +
-      f[i][INCREMENT(j)][k] + f[i][DECREMENT(j)][k] +
-      f[INCREMENT(i)][j][k] + f[DECREMENT(i)][j][k] -
-      6. * f[i][j][k]
+      f[idx(i,j,INCREMENT(k))] + f[idx(i,j,DECREMENT(k))] +
+      f[idx(i,INCREMENT(j),k)] + f[idx(i,DECREMENT(j),k)] +
+      f[idx(INCREMENT(i),j,k)] + f[idx(DECREMENT(i),j,k)] -
+      6. * f[idx(i,j,k)]
     );
   } else {
     return (
-      f[i][j][k + 1] + f[i][j][k - 1] +
-      f[i][j + 1][k] + f[i][j - 1][k] +
-      f[i + 1][j][k] + f[i - 1][j][k] -
-      6. * f[i][j][k]
+      f[idx(i,j,k+1)] + f[idx(i,j,k-1)] +
+      f[idx(i,j+1,k)] + f[idx(i,j-1,k)] +
+      f[idx(i+1,j,k)] + f[idx(i-1,j,k)] -
+      6. * f[idx(i,j,k)]
     );
   }
 }
@@ -59,17 +59,17 @@ inline float lapl(INDEXLIST) {
 // Compute gradient energy density (averaged)
 float gradient_energy() {
   DECLARE_INDICES
-  double gradient = 0.;
+  float gradient = 0.;
   float norm = pw2(1. / (a * dx));
-  LOOP gradient -= f[i][j][k] * lapl(i, j, k);
+  LOOP gradient -= f[idx(i,j,k)] * lapl(i, j, k);
   return 0.5 * gradient * norm / (float)gridsize;
 }
 
 // Compute kinetic energy density (averaged)
 float kin_energy() {
   DECLARE_INDICES
-  double deriv_energy = 0.;
-  LOOP deriv_energy += pw2(fd[i][j][k]);
+  float deriv_energy = 0.;
+  LOOP deriv_energy += pw2(fd[idx(i,j,k)]);
   deriv_energy /= (float)gridsize;
   return 0.5 * pow(a, 2. * rescale_s - 2.) * deriv_energy;
 }
@@ -97,9 +97,9 @@ void evolve_derivs(float d) {
 #pragma omp parallel for collapse(3)
 #endif
   LOOP {
-    fd[i][j][k] += d * (
+    fd[idx(i,j,k)] += d * (
       laplnorm * lapl(i, j, k)
-      - (2. + rescale_s) * ad * fd[i][j][k] / a
+      - (2. + rescale_s) * ad * fd[idx(i,j,k)] / a
       - pow(a, 2. - 2. * rescale_s) * potential_derivative(i, j, k)
     );
   }
@@ -115,7 +115,7 @@ void evolve_fields(float d) {
 #if parallel_calculation
 #pragma omp parallel for collapse(3)
 #endif
-  LOOP f[i][j][k] += d * fd[i][j][k];
+  LOOP f[idx(i,j,k)] += d * fd[idx(i,j,k)];
 
   a += d * ad;
 }
@@ -164,7 +164,7 @@ void evolve_derivsN(float d) {
 #pragma omp parallel for collapse(3)
 #endif
   LOOP {
-    fd[i][j][k] += d * (-(3 - 0.5 * pw2(fd[i][j][k])) * (fd[i][j][k] + pot_ratio(i, j, k)));
+    fd[idx(i,j,k)] += d * (-(3 - 0.5 * pw2(fd[idx(i,j,k)])) * (fd[idx(i,j,k)] + pot_ratio(i, j, k)));
   }
 }
 
@@ -178,34 +178,34 @@ void evolve_fieldsN(float d) {
 #endif
   LOOP {
 #if monotonic_potential
-    if (abs(f[i][j][k]) > abs(phiref))
+    if (abs(f[idx(i,j,k)]) > abs(phiref))
 #else
-    if (potential(f[i][j][k]) > potential(phiref))
+    if (potential(f[idx(i,j,k)]) > potential(phiref))
 #endif
-    deltaN[i][j][k] += d;
+    deltaN[idx(i,j,k)] += d;
 
-    f[i][j][k] += d * fd[i][j][k];
+    f[idx(i,j,k)] += d * fd[idx(i,j,k)];
   }
 
   a += d * ad;
 }
 
-// Determine reference ϕ value for ending deltaN integration
+// Determine reference φ value for ending deltaN integration
 #ifndef phiref_manual
 float get_phiref() {
   DECLARE_INDICES
-  float fref = f[0][0][0];
+  float fref = f[idx(0,0,0)];
 
 #if parallel_calculation
 #pragma omp parallel for collapse(3)
 #endif
   LOOP {
 #if monotonic_potential
-    if (abs(f[i][j][k]) < abs(fref))
+    if (abs(f[idx(i,j,k)]) < abs(fref))
 #else
-    if (potential(f[i][j][k]) < potential(fref))
+    if (potential(f[idx(i,j,k)]) < potential(fref))
 #endif
-    fref = f[i][j][k];
+    fref = f[idx(i,j,k)];
   }
 
   return fref;

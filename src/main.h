@@ -13,16 +13,23 @@
 #include <float.h>
 #include <fstream>
 #include <vector>
+#include "parameters.h" // Adjustable simulation parameters
 
 // -------------------- Math and Constants --------------------
 
-#define float double
+#define float double // Work with double precision
+
 const float pi = (float)(2. * asin(1.));
+
 inline float pw2(float x) { return x * x; } // Square of a float
 
-// -------------------- Simulation Parameters --------------------
+// ----------------- Function to access vector elements -----------------
 
-#include "parameters.h" // Adjustable simulation parameters
+inline size_t idx(int i, int j, int k) {
+    return static_cast<size_t>(i) * N * N + static_cast<size_t>(j) * N + static_cast<size_t>(k);
+}
+
+// -------------------- Simulation Parameters --------------------
 
 // Grid spacing (comoving distance between points)
 const float dx = L / (float)N;
@@ -50,11 +57,12 @@ extern char mode_[];            // File open mode (write/append)
 // -------------------- Lattice Fields --------------------
 
 // Main field and its time derivative
-extern float f[N][N][N], fd[N][N][N];
+extern std::vector<float> f;
+extern std::vector<float> fd;
 
 #if perform_deltaN
 // deltaN field for separate evolution
-extern float deltaN[N][N][N];
+extern std::vector<float> deltaN;
 #endif
 
 // Nyquist frequency components for FFT
@@ -62,15 +70,14 @@ extern float fnyquist_p[N][2 * N], fdnyquist_p[N][2 * N];
 
 #if numerical_potential
 // Interpolation for numerical potential
-extern int lstart[N][N][N];                         // Interpolation index grid
+extern std::vector<int> lstart;                     // Interpolation index grid
 extern std::vector<float> field_numerical;          // Grid of ϕ values
 extern std::vector<float> potential_numerical;      // V(ϕ) values
 extern std::vector<float> potential_derivative_numerical; // dV/dϕ values
 #endif
 
 // -------------------- Grid Macros --------------------
-
-#define FIELD f[i][j][k]                                // Short-hand for f at (i,j,k)
+                             
 #define LOOP for(i=0;i<N;i++) for(j=0;j<N;j++) for(k=0;k<N;k++) // Loop over full grid
 #define INDEXLIST int i, int j, int k                   // Function parameter list for indexing
 #define DECLARE_INDICES int i, j, k;                    // Local index variable declarations
