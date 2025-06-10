@@ -110,7 +110,7 @@ The notebook reads data from `results/` and plots quantities like the field evol
 If you use *InflationEasy* in your research, please cite the associated code paper:  
 [arXiv:?????](https://arxiv.org/abs/????)
 
-Additional references where *InflationEasy* was developed and applied:
+Please cite also these additional references where *InflationEasy* was developed and applied:
 
 - [arXiv:2102.06378](https://arxiv.org/abs/2102.06378)
 - [arXiv:2209.13616](https://arxiv.org/abs/2209.13616)
