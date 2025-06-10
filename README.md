@@ -60,7 +60,7 @@ make
 Two default potentials are supported:
 
 1. **Numerical potential (default):**  
-   Implements the ultra-slow-roll (USR) potential described as Case I in [arXiv:2410.23942](https://arxiv.org/abs/2410.23942), with $\mathcal{P}_{\zeta,	ext{tree}}^{	ext{max}} = 10^{-2}$.
+   Implements the ultra-slow-roll (USR) potential described as Case I in [arXiv:2410.23942](https://arxiv.org/abs/2410.23942), with $\mathcal{P}_{\zeta,	\rm {tree}}^{	\rm {max}} = 10^{-2}$.
 
    **Note:** This option is slower than the analytical one. For faster runs (e.g., on a laptop), prefer an analytical potential.
 
