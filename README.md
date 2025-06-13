@@ -3,7 +3,7 @@
 
 ![](https://github.com/user-attachments/assets/7af3e20c-ec15-4f93-8764-85e422bbe8d7)
 
-**InflationEasy** is a C++ program designed to simulate single-field inflation on a 3D lattice in an expanding FLRW universe. It is inspired by and partially adapted from [LATTICEEASY](http://www.felderbooks.com/latticeeasy/) by Gary Felder and Igor Tkachev.
+**InflationEasy** is the first lattice simulation specifically developed for cosmological inflation. It simulates single-field inflation on a 3D lattice in an expanding FLRW universe and is written in C++.  The code is inspired by and partially adapted from [LATTICEEASY](http://www.felderbooks.com/latticeeasy/) by Gary Felder and Igor Tkachev.
 
 More information is available in the associated publication: [arXiv:?????](https://arxiv.org/abs/????).
 
