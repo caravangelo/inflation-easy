@@ -118,7 +118,7 @@ Please cite also these additional references where *InflationEasy* was developed
 - [arXiv:2209.13616](https://arxiv.org/abs/2209.13616)
 - [arXiv:2403.12811](https://arxiv.org/abs/2403.12811)
 - [arXiv:2410.23942](https://arxiv.org/abs/2410.23942)
-- [arXiv:????](https://arxiv.org/abs/????)
+- [arXiv:2506.11795](https://arxiv.org/abs/2506.11795)
 
 ## License
 
