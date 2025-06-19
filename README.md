@@ -61,15 +61,16 @@ make
 
 Two default potentials are supported:
 
-1. **Numerical potential (default):**  
+1. **Numerical potential (default)**  
    Implements the ultra-slow-roll (USR) potential described as Case I in [arXiv:2410.23942](https://arxiv.org/abs/2410.23942), with $\mathcal{P}_{\zeta,	\rm {tree}}^{	\rm {max}} = 10^{-2}$.
 
    **Note:** This option is slower than the analytical one. For faster runs (e.g., on a laptop), prefer an analytical potential.
 
-2. **Analytical potential:**  
-   The quadratic potential $V(\phi) = \frac{1}{2}m^2\phi^2$.  
-   In this case, the (optional) $\delta N$ calculation for nonlinear $\zeta$ (see arXiv:????.?????) is typically unnecessary due to the small amplitude of perturbations.
-
+2. **Analytical potential**  
+   The hilltop potential:
+   
+ $$V(\phi) = V_0 \left(1 - \frac{1-n_s}{2}\frac{\phi^2}{2 M_{\rm Pl}^2}\right).$$  
+   
 Switch between these via the `numerical_potential` flag in `parameters.h`.
 
 ### Custom Potentials
