@@ -12,11 +12,11 @@
 // -------------------------------------------------------------
 
 float analytic_potential(float field_value) {
-    return 0.5 * m2 * pw2(field_value) / pw2(rescale_B);
+    return V0 * (1. - (1. - ns) / 4. * pw2(field_value)) / pw2(rescale_B);
 }
 
 float analytic_potential_derivative(float field_value) {
-    return field_value * m2 / pw2(rescale_B);
+    return -V0 * (1. - ns) / 2. * field_value / pw2(rescale_B);
 }
 #endif
 

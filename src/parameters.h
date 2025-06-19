@@ -9,11 +9,6 @@
 /// Set to 1 to enable OpenMP parallelism in selected loops (if supported by the compiler)
 #define parallel_calculation 1
 
-#if perform_deltaN
-// Set to 1 if the potential is monotonic in |ϕ|; speeds up deltaN computation
-#define monotonic_potential 1
-#endif
-
 // -------------------- Lattice and Evolution Parameters --------------------
 
 // Number of points along each spatial dimension (total lattice points will be N^3)
@@ -34,7 +29,7 @@ const int seed = 8;
 // Parameters used if the potential is loaded from file
 
 const float V0 = 3e-9; // Potential parameter
-const float rescale_B = sqrt(V0); // Field rescaling factor (see doc)
+const float rescale_B = sqrt(V0); // Rescaling factor (see doc)
 const float initial_field = 2.9181235049318586; // Initial field value
 const float initial_derivative = -0.06727651095116181; // Initial field velocity (in code units)
 const float L = 10.; // Comoving box size in code units (must be sub-horizon at start)
@@ -46,18 +41,26 @@ const int output_infrequent_freq = 100;
 #if perform_deltaN
 const float dN = 0.0001; // e-fold increment in deltaN evolution
 const float Nend = 2.;   // Final e-folding time for deltaN run
-// const float phiref_manual = value; // (Optional) manually set the reference ϕ value 
+// const float phiref_manual = value; // (Optional) manually set the reference ϕ value
+
+// Set monotonic_potential = 1 if the potential increases with |ϕ|
+// Set antimonotonic_potential = 1 if it decreases with |ϕ|
+// Leave both set to 0 for general potentials, in which case deltaN evolution is slower. 
+#define monotonic_potential 1
+#define antimonotonic_potential 0
+
 #endif
 
 #else
 // Parameters used for an analytic potential (defaults are for quadratic potential)
 
-const float m2 = 0.263e-10; // Mass squared for quadratic potential
-const float rescale_B = sqrt(m2);
-const float initial_field = 14.5; // Initial field value
-const float initial_derivative = -0.81529; // Initial field velocity (in code units)
-const float L = 2.; // Comoving box size in code units (must be sub-horizon at start)
-const float dt = 0.00005; // Time step
+const float V0 = 3.338e-13; // Potential parameter
+const float ns = 0.97; // Spectral index
+const float rescale_B = sqrt(V0); // Rescaling factor (see doc)
+const float initial_field = 0.0935; // Initial field value
+const float initial_derivative = 0.000796; // Initial field velocity (in code units)
+const float L = 10.; // Comoving box size in code units (must be sub-horizon at start)
+const float dt = 0.0005; // Time step
 // Output frequency in time steps (standard and infrequent quantities)
 const int output_freq = 200;
 const int output_infrequent_freq = 200;
@@ -66,6 +69,13 @@ const int output_infrequent_freq = 200;
 const float dN = 0.0000001; // e-fold increment in deltaN evolution
 const float Nend = 0.001; // Final e-folding time for deltaN run
 // const float phiref_manual = value; // (Optional) manually set the reference ϕ value
+
+// Set monotonic_potential = 1 if the potential increases with |ϕ|
+// Set antimonotonic_potential = 1 if it decreases with |ϕ|
+// Leave both set to 0 for general potentials, in which case deltaN evolution is slower.
+#define monotonic_potential 0
+#define antimonotonic_potential 1
+
 #endif
 #endif
 

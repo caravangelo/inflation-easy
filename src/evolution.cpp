@@ -179,6 +179,8 @@ void evolve_fieldsN(float d) {
   LOOP {
 #if monotonic_potential
     if (abs(f[idx(i,j,k)]) > abs(phiref))
+#elif antimonotonic_potential
+    if (abs(f[idx(i,j,k)]) < abs(phiref))
 #else
     if (potential(f[idx(i,j,k)]) > potential(phiref))
 #endif
@@ -202,6 +204,8 @@ float get_phiref() {
   LOOP {
 #if monotonic_potential
     if (abs(f[idx(i,j,k)]) < abs(fref))
+#elif antimonotonic_potential
+    if (abs(f[idx(i,j,k)]) > abs(fref))
 #else
     if (potential(f[idx(i,j,k)]) < potential(fref))
 #endif
