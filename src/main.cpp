@@ -14,6 +14,11 @@ std::vector<float> fd;
 std::vector<float> deltaN;
 #endif
 
+#if calculate_SIGW
+std::vector<float> hij[6];
+std::vector<float> hijd[6];
+#endif
+
 float fnyquist_p[N][2*N], fdnyquist_p[N][2*N];
 float t, t0;
 float astep = 1., a = 1., ad = 0., ad2 = 0., ad0 = 0., Ne = 0.;

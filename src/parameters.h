@@ -4,15 +4,18 @@
 #define numerical_potential 1
 
 // Set to 1 to perform deltaN evolution to calculate zeta
-#define perform_deltaN 1
+#define perform_deltaN 0
 
 /// Set to 1 to enable OpenMP parallelism in selected loops (if supported by the compiler)
 #define parallel_calculation 1
 
+// Set to 1 to enable the calculation of SIGWs
+#define calculate_SIGW 1
+
 // -------------------- Lattice and Evolution Parameters --------------------
 
 // Number of points along each spatial dimension (total lattice points will be N^3)
-const int N = 128; // Must be a power of 2
+const int N = 64; // Must be a power of 2
 
 // Rescaling exponent (must be 0 unless you've tested otherwise)
 const float rescale_s = 0;

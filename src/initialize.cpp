@@ -33,6 +33,9 @@ float rand_uniform(void) {
 void initialize_simulation() {
   initialize();        // Basic checks and global param setup
   initializef();       // Set field configuration and apply FFT
+  #if calculate_SIGW
+  initializeGW();
+  #endif
   output_parameters(); // Save run configuration
   save(1);             // First output
   t = t0;              // Set initial time
@@ -218,6 +221,15 @@ void initializeN() {
     H_lat = sqrt(potential(f[idx(i,j,k)]) / 3.);
     fd[idx(i,j,k)] = fd[idx(i,j,k)] * pow(a, rescale_s - 1) / H_lat;
     deltaN[idx(i,j,k)] = 0.;
+  }
+}
+#endif
+
+#if calculate_SIGW
+void initializeGW() {
+  for (int c = 0; c < 6; ++c) {
+    hij[c].resize(N * N * N, 0.0f);
+    hijd[c].resize(N * N * N, 0.0f);
   }
 }
 #endif

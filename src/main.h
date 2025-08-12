@@ -29,6 +29,31 @@ inline size_t idx(int i, int j, int k) {
     return static_cast<size_t>(i) * N * N + static_cast<size_t>(j) * N + static_cast<size_t>(k);
 }
 
+// Map tensor index (i,j) to the unique component index (0 to 5)
+inline int sym_idx(int i, int j) {
+    if (i > j) std::swap(i, j);
+    if (i == 0 && j == 0) return 0;
+    if (i == 1 && j == 1) return 1;
+    if (i == 2 && j == 2) return 2;
+    if (i == 0 && j == 1) return 3;
+    if (i == 0 && j == 2) return 4;
+    if (i == 1 && j == 2) return 5;
+    throw std::out_of_range("Invalid tensor indices");
+}
+
+// Returns the symmetric tensor indices (l,m) for component index comp = 0..5
+inline std::pair<int,int> comp_to_indices(int comp) {
+    switch(comp) {
+        case 0: return {0,0};
+        case 1: return {1,1};
+        case 2: return {2,2};
+        case 3: return {0,1};
+        case 4: return {0,2};
+        case 5: return {1,2};
+        default: throw std::out_of_range("Invalid component index");
+    }
+}
+
 // -------------------- Simulation Parameters --------------------
 
 // Grid spacing (comoving distance between points)
@@ -65,6 +90,11 @@ extern std::vector<float> fd;
 extern std::vector<float> deltaN;
 #endif
 
+#if calculate_SIGW
+extern std::vector<float> hij[6];
+extern std::vector<float> hijd[6];
+#endif
+
 // Nyquist frequency components for FFT
 extern float fnyquist_p[N][2 * N], fdnyquist_p[N][2 * N];
 
@@ -87,6 +117,7 @@ extern std::vector<float> potential_derivative_numerical; // dV/dϕ values
 // Initialization
 void initialize();               // Basic parameter checks and hubble_init
 void initializef();              // Generate vacuum fluctuations
+void initializeGW(); 
 void initializeN();              // Setup for deltaN calculation
 void initialize_simulation();    // Full initialization pipeline
 
