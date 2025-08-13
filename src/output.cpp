@@ -272,7 +272,7 @@ void spectraf()
     return;
 }
 
-void spectra_GW()
+void spectraGW()
 {
     static FILE *spectraGW_; // Output files for power spectra and times at which spectra were taken
     const int maxnumbins = (int)(1.73205 * (N / 2)) + 1; // Number of bins (bin spacing=lattice spacing in Fourier space) = sqrt(NDIMS)*(N/2)+1. Set for 3D.
@@ -1491,7 +1491,12 @@ void save(int infrequent)
         if (output_energy)
             energy();
         if (output_spectra)
+        {
             spectraf();
+        #if calculate_SIGW
+            spectraGW();
+        #endif
+        }
         if (output_histogram)
             histograms();
     }
