@@ -272,7 +272,308 @@ void spectraf()
     return;
 }
 
+void spectraGW_boh()
+{
+    const int numBins = static_cast<int>(sqrt(3.0) * (N / 2)) + 1;
+    std::vector<int> counts(numBins, 0);
+    std::vector<float> power(numBins, 0.f);
+    float dp = 2.f * M_PI / L;
+
+    // Temporary array for FFT of hij
+    float fftH[6][N][2*N];
+
+    int dims[3] = {N, N, N};
+
+    // Perform forward FFT for each symmetric component
+    for (int c = 0; c < 6; ++c)
+        fftrn(hij[c].data(), (float*)fftH[c], 3, dims, 1);
+
+    // Loop over lattice points
+    for (int i = 0; i < N; ++i) {
+        int px = (i <= N/2 ? i : i - N);
+        for (int j = 0; j < N; ++j) {
+            int py = (j <= N/2 ? j : j - N);
+            for (int k = 0; k <= N/2; ++k) {  // include special slices
+                int pz = k;
+                float pMag = sqrtf(px*px + py*py + pz*pz);
+
+                if (pMag == 0.f) continue;  // skip zero mode
+                int bin = static_cast<int>(roundf(pMag));
+                if (bin >= numBins) continue;
+
+                // Reconstruct full 3x3 complex hij from symmetric components
+                float hRe[3][3] = {{0.f}}, hIm[3][3] = {{0.f}};
+                for (int l = 0; l < 3; ++l) {
+                    for (int m = l; m < 3; ++m) {
+                        int comp = sym_idx(l,m);
+                        float re, im;
+                        if (k == N/2) {  // Nyquist
+                            re = fftH[comp][i][2*j];
+                            im = fftH[comp][i][2*j+1];
+                        } else {
+                            int idx_mode = idx(i,j,k);
+                            re = hij[comp][idx_mode];
+                            im = hij[comp][idx_mode + 1];
+                        }
+                        hRe[l][m] = re; hIm[l][m] = im;
+                        if (m != l) { hRe[m][l] = re; hIm[m][l] = im; }
+                    }
+                }
+
+                // Unit vector khat
+                float invP = 1.f / pMag;
+                float kh[3] = {px*invP, py*invP, pz*invP};
+
+                // Projector P = I - kh kh^T
+                float P[3][3];
+                for (int a=0; a<3; ++a)
+                    for (int b=0; b<3; ++b)
+                        P[a][b] = (a==b ? 1.f : 0.f) - kh[a]*kh[b];
+
+                // Trace P h
+                float traceRe=0.f, traceIm=0.f;
+                for (int a=0; a<3; ++a)
+                    for (int b=0; b<3; ++b) {
+                        traceRe += P[a][b] * hRe[a][b];
+                        traceIm += P[a][b] * hIm[a][b];
+                    }
+
+                // TT projection: hTT = P h P^T - 0.5 P Tr(P h)
+                float hTTRe[3][3] = {{0.f}}, hTTIm[3][3] = {{0.f}};
+                for (int a=0; a<3; ++a) {
+                    for (int b=0; b<3; ++b) {
+                        float sumRe=0.f, sumIm=0.f;
+                        for (int l=0; l<3; ++l)
+                            for (int m=0; m<3; ++m) {
+                                sumRe += P[a][l] * hRe[l][m] * P[b][m];
+                                sumIm += P[a][l] * hIm[l][m] * P[b][m];
+                            }
+                        hTTRe[a][b] = sumRe - 0.5f * P[a][b] * traceRe;
+                        hTTIm[a][b] = sumIm - 0.5f * P[a][b] * traceIm;
+                    }
+                }
+
+                // Compute |hTT|^2
+                float modePower=0.f;
+                for (int a=0; a<3; ++a)
+                    for (int b=0; b<3; ++b)
+                        modePower += hTTRe[a][b]*hTTRe[a][b] + hTTIm[a][b]*hTTIm[a][b];
+
+                // Count contribution: special slices once, others twice
+                int weight = (k==0 || k==N/2) ? 1 : 2;
+                counts[bin] += weight;
+                power[bin] += weight * modePower;
+            }
+        }
+    }
+
+    // Normalize power if needed
+    for (int b=0; b<numBins; ++b) power[b] *= pow(L/rescale_B,3)/pow(N,6);
+
+    // Optional: write to file
+    static FILE* out = nullptr;
+    if (!out) out = fopen("results/spectraGW.dat","w");
+    for (int b=0; b<numBins; ++b) fprintf(out,"%f %f %d\n", b*dp, power[b], counts[b]);
+}
+
+
 void spectraGW()
+{
+    static FILE *spectraGW_; // Output files for power spectra and times at which spectra were taken
+    const int maxnumbins = (int)(1.73205 * (N / 2)) + 1; // Number of bins (sqrt(3)*(N/2)+1)
+    int numpoints[maxnumbins]; // Number of points in each momentum bin
+    float p[maxnumbins], f2[maxnumbins]; // Values for each bin: Momentum, |h_k|^2
+    int numbins = (int)(sqrt(3.) * (N / 2)) + 1;
+    float pmagnitude; // Total momentum (p) in units of lattice spacing
+    float dp = 2. * pi / L; // Size of grid spacing in momentum space
+    float fp2; // mode power
+    int i, j, k, px, py, pz, comp;
+    float norm1 = pow(L / rescale_B, 3) / pow(N, 6); // Normalization to reduced Planck mass units
+
+    float hijnyquist_p[6][N][2 * N]; // same shape you used
+    float P[3][3];
+
+    int arraysize[] = {N, N, N};
+
+    static int first = 1;
+    if (first)
+    {
+        snprintf(name_, sizeof(name_), "results/spectraGW%s", ext_);
+        spectraGW_ = fopen(name_, mode_);
+
+        first = 0;
+    }
+
+    for (i = 0; i < numbins; i++) p[i] = dp * i;
+    for (i = 0; i < numbins; i++) { numpoints[i] = 0; f2[i] = 0.f; }
+
+    // Forward FFT on each hij component (stores Nyquist in hijnyquist_p)
+    for (int c = 0; c < 6; ++c)
+        fftrn(hij[c].data(), (float*)hijnyquist_p[c], 3, arraysize, 1);
+
+    // Main k-loop: k = 1 .. N/2 - 1  (these have conjugate partners, count twice)
+    for (i = 0; i < N; ++i) {
+        px = (i <= N / 2 ? i : i - N);
+        for (j = 0; j < N; ++j) {
+            py = (j <= N / 2 ? j : j - N);
+            for (k = 1; k < N / 2; ++k) {
+                pz = k;
+                pmagnitude = sqrtf((float)(pw2(px) + pw2(py) + pw2(pz)));
+                int bin = (int)lroundf(pmagnitude);
+                if (bin >= numbins) continue;
+                int idx_mode = idx(i, j, 2 * k); // real part index for this (i,j,k)
+
+                // Build full 3x3 complex symmetric h_lm
+                float h_re[3][3] = {{0.f}};
+                float h_im[3][3] = {{0.f}};
+                for (int l = 0; l < 3; ++l) {
+                    for (int m = l; m < 3; ++m) {
+                        comp = sym_idx(l, m);
+                        float re = hij[comp][idx_mode];
+                        float im = hij[comp][idx_mode + 1];
+                        h_re[l][m] = re; h_im[l][m] = im;
+                        if (m != l) { h_re[m][l] = re; h_im[m][l] = im; }
+                    }
+                }
+
+                // unit vector khat
+                float inv_p = 1.0f / pmagnitude;
+                float khat[3] = {px * inv_p, py * inv_p, pz * inv_p};
+
+                // projector P_ij = delta_ij - khat_i khat_j
+                for (int x = 0; x < 3; ++x)
+                    for (int y = 0; y < 3; ++y)
+                        P[x][y] = (x == y ? 1.0f : 0.0f) - khat[x] * khat[y];
+
+                // compute trace = P_lm * h_lm (complex)
+                float trace_re = 0.f, trace_im = 0.f;
+                for (int l = 0; l < 3; ++l)
+                    for (int m = 0; m < 3; ++m) {
+                        trace_re += P[l][m] * h_re[l][m];
+                        trace_im += P[l][m] * h_im[l][m];
+                    }
+
+                // compute hTT = P h P^T - 1/2 P Tr(P h)
+                float hTT_re[3][3] = {{0.f}}, hTT_im[3][3] = {{0.f}};
+                for (int ii = 0; ii < 3; ++ii) {
+                    for (int jj = 0; jj < 3; ++jj) {
+                        float sum_re = 0.f, sum_im = 0.f;
+                        for (int l = 0; l < 3; ++l)
+                            for (int m = 0; m < 3; ++m) {
+                                // P_{i l} * h_{l m} * P_{j m}
+                                sum_re += P[ii][l] * h_re[l][m] * P[jj][m];
+                                sum_im += P[ii][l] * h_im[l][m] * P[jj][m];
+                            }
+                        hTT_re[ii][jj] = sum_re - 0.5f * P[ii][jj] * trace_re;
+                        hTT_im[ii][jj] = sum_im - 0.5f * P[ii][jj] * trace_im;
+                    }
+                }
+
+                // compute mode power
+                fp2 = 0.f;
+                for (int ii = 0; ii < 3; ++ii)
+                    for (int jj = 0; jj < 3; ++jj)
+                        fp2 += hTT_re[ii][jj] * hTT_re[ii][jj] + hTT_im[ii][jj] * hTT_im[ii][jj];
+
+                // k and -k (conjugate) both contribute -> count twice
+                numpoints[bin] += 2;
+                f2[bin] += 2.f * fp2;
+            }
+
+            // Special slices k = 0 and k = N/2 (counted once)
+            for (k = 0; k <= N / 2; k += N / 2) {
+                pz = k;
+                pmagnitude = sqrtf((float)(pw2(px) + pw2(py) + pw2(pz)));
+                if (pmagnitude == 0.f) continue;
+                int bin = (int)lroundf(pmagnitude);
+                if (bin >= numbins) continue;
+
+                int idx_mode;
+                bool use_nyquist = (k == N/2);
+                if (!use_nyquist) {
+                    idx_mode = idx(i, j, 0); // k==0 stored at 0,1
+                }
+
+                // Build full h matrix for this special k
+                float h_re[3][3] = {{0.f}};
+                float h_im[3][3] = {{0.f}};
+                for (int l = 0; l < 3; ++l) {
+                    for (int m = l; m < 3; ++m) {
+                        comp = sym_idx(l, m);
+                        float re, im;
+                        if (use_nyquist) {
+                            // Nyquist stored in hijnyquist_p[comp][i][2*j], [2*j+1]
+                            re = hijnyquist_p[comp][i][2 * j];
+                            im = hijnyquist_p[comp][i][2 * j + 1];
+                        } else {
+                            re = hij[comp][idx_mode];
+                            im = hij[comp][idx_mode + 1];
+                        }
+                        h_re[l][m] = re; h_im[l][m] = im;
+                        if (m != l) { h_re[m][l] = re; h_im[m][l] = im; }
+                    }
+                }
+
+                // khat & projector
+                float inv_p = 1.0f / pmagnitude;
+                float khat[3] = {px * inv_p, py * inv_p, pz * inv_p};
+                for (int x = 0; x < 3; ++x)
+                    for (int y = 0; y < 3; ++y)
+                        P[x][y] = (x == y ? 1.0f : 0.0f) - khat[x] * khat[y];
+
+                // trace (complex)
+                float trace_re = 0.f, trace_im = 0.f;
+                for (int l = 0; l < 3; ++l)
+                    for (int m = 0; m < 3; ++m) {
+                        trace_re += P[l][m] * h_re[l][m];
+                        trace_im += P[l][m] * h_im[l][m];
+                    }
+
+                // project
+                float hTT_re[3][3] = {{0.f}}, hTT_im[3][3] = {{0.f}};
+                for (int ii = 0; ii < 3; ++ii) {
+                    for (int jj = 0; jj < 3; ++jj) {
+                        float sum_re = 0.f, sum_im = 0.f;
+                        for (int l = 0; l < 3; ++l)
+                            for (int m = 0; m < 3; ++m) {
+                                sum_re += P[ii][l] * h_re[l][m] * P[jj][m];
+                                sum_im += P[ii][l] * h_im[l][m] * P[jj][m];
+                            }
+                        hTT_re[ii][jj] = sum_re - 0.5f * P[ii][jj] * trace_re;
+                        hTT_im[ii][jj] = sum_im - 0.5f * P[ii][jj] * trace_im;
+                    }
+                }
+
+                // power and single counting
+                fp2 = 0.f;
+                for (int ii = 0; ii < 3; ++ii)
+                    for (int jj = 0; jj < 3; ++jj)
+                        fp2 += hTT_re[ii][jj] * hTT_re[ii][jj] + hTT_im[ii][jj] * hTT_im[ii][jj];
+
+                numpoints[bin] += 1;
+                f2[bin] += fp2;
+            }
+        }
+    }
+
+    // finalize bins and write out
+    for (i = 0; i < numbins; i++) {
+        if (numpoints[i] > 0) f2[i] = f2[i] / numpoints[i];
+        fprintf(spectraGW_, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
+    }
+
+    // Backward FFT to restore hij arrays
+    for (int comp = 0; comp < 6; comp++)
+        fftrn(hij[comp].data(), (float*)hijnyquist_p[comp], 3, arraysize, -1);
+
+    fprintf(spectraGW_, "\n");
+    fflush(spectraGW_);
+
+    return;
+}
+
+
+void spectraGW_old()
 {
     static FILE *spectraGW_; // Output files for power spectra and times at which spectra were taken
     const int maxnumbins = (int)(1.73205 * (N / 2)) + 1; // Number of bins (bin spacing=lattice spacing in Fourier space) = sqrt(NDIMS)*(N/2)+1. Set for 3D.

@@ -15,7 +15,7 @@
 // -------------------- Lattice and Evolution Parameters --------------------
 
 // Number of points along each spatial dimension (total lattice points will be N^3)
-const int N = 64; // Must be a power of 2
+const int N = 32; // Must be a power of 2
 
 // Rescaling exponent (must be 0 unless you've tested otherwise)
 const float rescale_s = 0;
@@ -35,7 +35,7 @@ const float V0 = 3e-9; // Potential parameter
 const float rescale_B = sqrt(V0); // Rescaling factor (see doc)
 const float initial_field = 2.9181235049318586; // Initial field value
 const float initial_derivative = -0.06727651095116181; // Initial field velocity (in code units)
-const float L = 10.; // Comoving box size in code units (must be sub-horizon at start)
+const float L = 2.; //10 Comoving box size in code units (must be sub-horizon at start)
 const float dt = 0.001; // Time step
 // Output frequency in time steps (standard and infrequent quantities)
 const int output_freq = 100;
