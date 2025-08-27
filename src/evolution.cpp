@@ -16,26 +16,6 @@ inline int DECREMENT(int i) {
 
 // -------------------- Laplacians --------------------
 
-// Laplacian of fd used in evolution equations (with edge handling)
-inline float lapld(int i, int j, int k) {
-  if (i == 0 || j == 0 || k == 0 || i == N - 1 || j == N - 1 || k == N - 1) {
-    return (
-      fd[idx(i,j,INCREMENT(k))] + fd[idx(i,j,DECREMENT(k))] +
-      fd[idx(i,INCREMENT(j),k)] + fd[idx(i,DECREMENT(j),k)] +
-      fd[idx(INCREMENT(i),j,k)] + fd[idx(DECREMENT(i),j,k)] -
-      6. * fd[idx(i,j,k)]
-    );
-  } else {
-    return (
-      fd[idx(i,j,k+1)] + fd[idx(i,j,k-1)] +
-      fd[idx(i,j+1,k)] + fd[idx(i,j-1,k)] +
-      fd[idx(i+1,j,k)] + fd[idx(i-1,j,k)] -
-      6. * fd[idx(i,j,k)]
-    );
-  }
-}
-
-// Laplacian of f (same structure as above)
 inline float lapl(int i, int j, int k) {
   if (i == 0 || j == 0 || k == 0 || i == N - 1 || j == N - 1 || k == N - 1) {
     return (
