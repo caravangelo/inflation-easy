@@ -15,7 +15,7 @@
 // -------------------- Lattice and Evolution Parameters --------------------
 
 // Number of points along each spatial dimension (total lattice points will be N^3)
-const int N = 32; // Must be a power of 2
+const int N = 64; // Must be a power of 2
 
 // Rescaling exponent (must be 0 unless you've tested otherwise)
 const float rescale_s = 0;

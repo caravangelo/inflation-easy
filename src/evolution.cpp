@@ -80,7 +80,8 @@ float stress_energy(int l, int m, int i, int j, int k) {
               //+ delta_lm * (0.5f * powf(a, 2.f * rescale_s) * dt_phi * dt_phi - 0.5f * grad_phi_sq)
               //- delta_lm * pw2(a) * potential(f[idx(i,j,k)]);
 
-  return Tij; // Tij/pw2(rescale_B);
+  //return Tij/pw2(rescale_B);
+  return Tij;
 }
 
 #endif
@@ -137,7 +138,8 @@ void evolve_derivs(float d) {
 
 #if calculate_SIGW
     // Precompute RHS prefactor for the source term
-    const float fac_source = 2.0f * pow(a, 2.0f - 2.0f * rescale_s);
+    //const float fac_source = 2.0f * pow(a, 2.0f - 2.0f * rescale_s);
+    const float fac_source = 2.0f * pow(a, -2.0f * rescale_s);
 
     // Gravitational wave tensor evolution:
     // compute spatial derivatives once per cell, build trace-free Pi_{ij} and update all 6 components
