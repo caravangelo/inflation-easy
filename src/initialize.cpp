@@ -227,9 +227,10 @@ void initializeN() {
 
 #if calculate_SIGW
 void initializeGW() {
+  const size_t gs = static_cast<size_t>(N) * N * N;
   for (int c = 0; c < 6; ++c) {
-    hij[c].resize(N * N * N, 0.0f);
-    hijd[c].resize(N * N * N, 0.0f);
+    hij[c].assign(gs, 0.0);   // size to gs and zero all entries
+    hijd[c].assign(gs, 0.0);
   }
 }
 #endif

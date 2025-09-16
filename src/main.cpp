@@ -20,6 +20,9 @@ std::vector<float> hijd[6];
 #endif
 
 float fnyquist_p[N][2*N], fdnyquist_p[N][2*N];
+#if calculate_SIGW
+float hijnyquist_p[6][N][2*N], hijdnyquist_p[6][N][2*N];
+#endif
 float t, t0;
 float astep = 1., a = 1., ad = 0., ad2 = 0., ad0 = 0., Ne = 0.;
 float phiref = 0; // Reference field value for deltaN calculation

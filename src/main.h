@@ -97,6 +97,9 @@ extern std::vector<float> hijd[6];
 
 // Nyquist frequency components for FFT
 extern float fnyquist_p[N][2 * N], fdnyquist_p[N][2 * N];
+#if calculate_SIGW
+extern float hijnyquist_p[6][N][2*N], hijdnyquist_p[6][N][2*N];
+#endif
 
 #if numerical_potential
 // Interpolation for numerical potential

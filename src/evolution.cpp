@@ -56,32 +56,22 @@ inline float dfdx(int dim, int i, int j, int k, const std::vector<float>& field)
     }
   }
 }
+// -------------------- Stress-energy tensor (inflaton) --------------------
+
+// Pack of first derivatives for one site
+struct GradPack {
+    float g[3];   // ∂_x φ, ∂_y φ, ∂_z φ
+};
+
+inline void build_grad_pack(int i, int j, int k, GradPack& P) {
+    P.g[0] = dfdx(0, i, j, k, f);
+    P.g[1] = dfdx(1, i, j, k, f);
+    P.g[2] = dfdx(2, i, j, k, f);
+}
 
 // Stress-energy tensor component T_{lm} at site (i,j,k)
-float stress_energy(int l, int m, int i, int j, int k) {
-  // Derivatives of phi
-  float dphi_l = dfdx(l, i, j, k, f);
-  float dphi_m = dfdx(m, i, j, k, f);
-  //float dt_phi = fd[idx(i, j, k)]; // conformal time derivative
-
-  // Gradient magnitude squared: sum_n (dphi_n)^2
-  //float grad_phi_sq = 0.f;
-  //for (int n = 0; n < 3; ++n) {
-  //  float dphi_n = dfdx(n, i, j, k, f);
-  //  grad_phi_sq += dphi_n * dphi_n;
-  //}
-
-  // Prefactors from metric in tilde units
-  // Recall T_{ij} = d_i phi d_j phi + delta_ij [ 1/2 a^{2s} (dt phi)^2 - 1/2 (grad phi)^2 ] - (a^2 / B^2) delta_ij V(phi)
-
-  //float delta_lm = (l == m) ? 1.f : 0.f;
-
-  float Tij = dphi_l * dphi_m;
-              //+ delta_lm * (0.5f * powf(a, 2.f * rescale_s) * dt_phi * dt_phi - 0.5f * grad_phi_sq)
-              //- delta_lm * pw2(a) * potential(f[idx(i,j,k)]);
-
-  //return Tij/pw2(rescale_B);
-  return Tij;
+inline float stress_energy_fast(int l, int m, const GradPack& P) {
+    return P.g[l] * P.g[m];
 }
 
 #endif
@@ -89,138 +79,26 @@ float stress_energy(int l, int m, int i, int j, int k) {
 
 // Compute gradient energy density (averaged)
 float gradient_energy() {
-  DECLARE_INDICES
-  float gradient = 0.;
-  float norm = pw2(1. / (a * dx));
-  LOOP gradient -= f[idx(i,j,k)] * lapl(i, j, k, f);
-  return 0.5 * gradient * norm / (float)gridsize;
+    DECLARE_INDICES
+    float gradient = 0.;
+    float norm = pw2(1. / (a * dx));
+    LOOP gradient -= f[idx(i,j,k)] * lapl(i, j, k, f);
+    return 0.5 * gradient * norm / (float)gridsize;
 }
 
 // Compute kinetic energy density (averaged)
 float kin_energy() {
-  DECLARE_INDICES
-  float deriv_energy = 0.;
-  LOOP deriv_energy += pw2(fd[idx(i,j,k)]);
-  deriv_energy /= (float)gridsize;
-  return 0.5 * pow(a, 2. * rescale_s - 2.) * deriv_energy;
+    DECLARE_INDICES
+    float deriv_energy = 0.;
+    LOOP deriv_energy += pw2(fd[idx(i,j,k)]);
+    deriv_energy /= (float)gridsize;
+    return 0.5 * pow(a, 2. * rescale_s - 2.) * deriv_energy;
 }
 
 // -------------------- Main Field Evolution --------------------
 
 // Leapfrog update of field derivatives
 void evolve_derivs(float d) {
-    DECLARE_INDICES
-
-    float laplnorm = pow(a, -2.0f * rescale_s) / pw2(dx);
-    float sfev1    = rescale_s + 1.0f;
-    float sfev2    = -2.0f * rescale_s + 2.0f;
-
-    // Update second derivative of scale factor (ad2)
-    ad2 = (-2.0f * ad - 2.0f * a / d / sfev1 * (
-               1.0f - sqrt(1.0f + 2.0f * d * sfev1 * ad / a +
-               pw2(d) * sfev1 * pow(a, sfev2) *
-               (2.0f * gradient_energy() / 3.0f + potential_energy()))
-           )) / d;
-
-    ad += 0.5f * d * ad2;
-
-    // Scalar field evolution (unchanged)
-#if parallel_calculation
-#pragma omp parallel for collapse(3)
-#endif
-    LOOP {
-        fd[idx(i,j,k)] += d * (
-            laplnorm * lapl(i, j, k, f)
-            - (2.0f + rescale_s) * ad * fd[idx(i,j,k)] / a
-            - pow(a, 2.0f - 2.0f * rescale_s) * potential_derivative(i, j, k)
-        );
-    }
-
-#if calculate_SIGW
-    // Precompute RHS prefactor for the source term
-    //const float fac_source = 2.0f * pow(a, 2.0f - 2.0f * rescale_s);
-    const float fac_source = 2.0f * pow(a, -2.0f * rescale_s);
-
-    // Gravitational wave tensor evolution:
-    // compute spatial derivatives once per cell, build trace-free Pi_{ij} and update all 6 components
-#if parallel_calculation
-#pragma omp parallel for collapse(3)
-#endif
-    LOOP {
-        const int id = idx(i,j,k);
-
-        // compute tilde-derivatives once
-        float d0 = dfdx(0, i, j, k, f);
-        float d1 = dfdx(1, i, j, k, f);
-        float d2 = dfdx(2, i, j, k, f);
-
-        float grad_sq = d0*d0 + d1*d1 + d2*d2;
-        float one_third = (1.f/3.f) * grad_sq;
-
-        // Laplacians of hij components (each uses the same laplnorm)
-        // Note: lapl reads hij[comp] neighbors; kept as-is to match your stencil
-        float lap_h0 = lapl(i, j, k, hij[0]); // xx
-        float lap_h1 = lapl(i, j, k, hij[1]); // yy
-        float lap_h2 = lapl(i, j, k, hij[2]); // zz
-        float lap_h3 = lapl(i, j, k, hij[3]); // xy
-        float lap_h4 = lapl(i, j, k, hij[4]); // xz
-        float lap_h5 = lapl(i, j, k, hij[5]); // yz
-
-        // friction factor for h' term (same as scalar)
-        float fric_common = (2.0f + rescale_s) * ad / a;
-
-        // compute source (trace-free Pi components in tilde indices)
-        float Pi_xx = d0 * d0 - one_third;
-        float Pi_yy = d1 * d1 - one_third;
-        float Pi_zz = d2 * d2 - one_third;
-        float Pi_xy = d0 * d1;
-        float Pi_xz = d0 * d2;
-        float Pi_yz = d1 * d2;
-
-        // update hijd components (leapfrog style update of derivatives)
-        hijd[0][id] += d * (
-            laplnorm * lap_h0
-            - fric_common * hijd[0][id] 
-            + fac_source * Pi_xx
-        );
-
-        hijd[1][id] += d * (
-            laplnorm * lap_h1
-            - fric_common * hijd[1][id] 
-            + fac_source * Pi_yy
-        );
-
-        hijd[2][id] += d * (
-            laplnorm * lap_h2
-            - fric_common * hijd[2][id] 
-            + fac_source * Pi_zz
-        );
-
-        hijd[3][id] += d * (
-            laplnorm * lap_h3
-            - fric_common * hijd[3][id] 
-            + fac_source * Pi_xy
-        );
-
-        hijd[4][id] += d * (
-            laplnorm * lap_h4
-            - fric_common * hijd[4][id] 
-            + fac_source * Pi_xz
-        );
-
-        hijd[5][id] += d * (
-            laplnorm * lap_h5
-            - fric_common * hijd[5][id] 
-            + fac_source * Pi_yz
-        );
-    }
-#endif
-
-    ad += 0.5f * d * ad2;
-}
-
-// Leapfrog update of field derivatives
-void evolve_derivs_old(float d) {
     DECLARE_INDICES
 
     float laplnorm = pow(a, -2.0f * rescale_s) / pw2(dx);
@@ -251,16 +129,32 @@ void evolve_derivs_old(float d) {
 #if calculate_SIGW
     // Gravitational wave tensor evolution
 #if parallel_calculation
-#pragma omp parallel for collapse(4)
+#pragma omp parallel for collapse(3)
 #endif
-    for (int comp = 0; comp < 6; ++comp)
-    LOOP {
-        auto [l, m] = comp_to_indices(comp);
-        hijd[comp][idx(i,j,k)] += d * (
-            laplnorm * lapl(i, j, k, hij[comp])
-            - (2.0f + rescale_s) * ad * hijd[comp][idx(i,j,k)] / a
-            + 2.0f * pow(a, 2.0f - 2.0f * rescale_s) * stress_energy(l, m, i, j, k)
-        );
+    for (int i=0; i<N; ++i)
+    for (int j=0; j<N; ++j)
+    for (int k=0; k<N; ++k) {
+        const int id = idx(i,j,k);
+
+        // build gradients once
+        GradPack G; build_grad_pack(i,j,k,G);
+
+        // explicit six components
+        const float T_xx = stress_energy_fast(0,0,G);
+        const float T_yy = stress_energy_fast(1,1,G);
+        const float T_zz = stress_energy_fast(2,2,G);
+        const float T_xy = stress_energy_fast(0,1,G);
+        const float T_xz = stress_energy_fast(0,2,G);
+        const float T_yz = stress_energy_fast(1,2,G);
+
+        const float srcAmp = 2.0f * pow(a, -2.0f * rescale_s);
+
+        hijd[0][id] += d * (laplnorm * lapl(i,j,k,hij[0]) - (2.0f+rescale_s)*ad*hijd[0][id]/a + srcAmp * T_xx);
+        hijd[1][id] += d * (laplnorm * lapl(i,j,k,hij[1]) - (2.0f+rescale_s)*ad*hijd[1][id]/a + srcAmp * T_yy);
+        hijd[2][id] += d * (laplnorm * lapl(i,j,k,hij[2]) - (2.0f+rescale_s)*ad*hijd[2][id]/a + srcAmp * T_zz);
+        hijd[3][id] += d * (laplnorm * lapl(i,j,k,hij[3]) - (2.0f+rescale_s)*ad*hijd[3][id]/a + srcAmp * T_xy);
+        hijd[4][id] += d * (laplnorm * lapl(i,j,k,hij[4]) - (2.0f+rescale_s)*ad*hijd[4][id]/a + srcAmp * T_xz);
+        hijd[5][id] += d * (laplnorm * lapl(i,j,k,hij[5]) - (2.0f+rescale_s)*ad*hijd[5][id]/a + srcAmp * T_yz);
     }
 #endif
 
@@ -424,3 +318,321 @@ void run_deltaN_loop(FILE* output_) {
   saveN();
 }
 #endif
+
+
+// -------------------- Post-inflation Evolution --------------------
+
+// ===== derivative pack (uses your existing dfdx, idx, INCREMENT/DECREMENT, N, dx) =====
+struct DerivPack {
+  float gf[3], gfd[3];  // ∂_i f, ∂_i fd
+  float Hf[6];          // Hessian(f): [xx, yy, zz, xy, xz, yz] in your sym_idx order
+  float f_here;
+};
+
+inline float d2_same(int dim, int i, int j, int k, const std::vector<float>& A) {
+  int ip = (dim==0? ((i==N-1)? (int)INCREMENT(i) : i+1) : i);
+  int im = (dim==0? ((i==0)  ? (int)DECREMENT(i) : i-1) : i);
+  int jp = (dim==1? ((j==N-1)? (int)INCREMENT(j) : j+1) : j);
+  int jm = (dim==1? ((j==0)  ? (int)DECREMENT(j) : j-1) : j);
+  int kp = (dim==2? ((k==N-1)? (int)INCREMENT(k) : k+1) : k);
+  int km = (dim==2? ((k==0)  ? (int)DECREMENT(k) : k-1) : k);
+
+  if (dim==0) return (A[idx(ip,j,k)] - 2.0f*A[idx(i,j,k)] + A[idx(im,j,k)])/(dx*dx);
+  if (dim==1) return (A[idx(i,jp,k)] - 2.0f*A[idx(i,j,k)] + A[idx(i,jm,k)])/(dx*dx);
+  return         (A[idx(i,j,kp)] - 2.0f*A[idx(i,j,k)] + A[idx(i,j,km)])/(dx*dx);
+}
+
+inline float d2_cross(int d1, int d2, int i, int j, int k, const std::vector<float>& A) {
+  int ip = ((d1==0||d2==0)? ((i==N-1)? (int)INCREMENT(i) : i+1) : i);
+  int im = ((d1==0||d2==0)? ((i==0)  ? (int)DECREMENT(i) : i-1) : i);
+  int jp = ((d1==1||d2==1)? ((j==N-1)? (int)INCREMENT(j) : j+1) : j);
+  int jm = ((d1==1||d2==1)? ((j==0)  ? (int)DECREMENT(j) : j-1) : j);
+  int kp = ((d1==2||d2==2)? ((k==N-1)? (int)INCREMENT(k) : k+1) : k);
+  int km = ((d1==2||d2==2)? ((k==0)  ? (int)DECREMENT(k) : k-1) : k);
+
+  float fpp = A[idx(ip,jp,kp)];
+  float fpm = A[idx(ip,jm,km)];
+  float fmp = A[idx(im,jp,kp)];
+  float fmm = A[idx(im,jm,km)];
+  return (fpp - fpm - fmp + fmm) / (4.0f*dx*dx);
+}
+
+inline void build_deriv_pack(int i, int j, int k, DerivPack& P) {
+  // first derivatives
+  P.gf[0]  = dfdx(0,i,j,k,f);
+  P.gf[1]  = dfdx(1,i,j,k,f);
+  P.gf[2]  = dfdx(2,i,j,k,f);
+  P.gfd[0] = dfdx(0,i,j,k,fd);
+  P.gfd[1] = dfdx(1,i,j,k,fd);
+  P.gfd[2] = dfdx(2,i,j,k,fd);
+
+  // Hessian entries in your sym_idx packing
+  P.Hf[sym_idx(0,0)] = d2_same(0,i,j,k,f);   // xx
+  P.Hf[sym_idx(1,1)] = d2_same(1,i,j,k,f);   // yy
+  P.Hf[sym_idx(2,2)] = d2_same(2,i,j,k,f);   // zz
+  P.Hf[sym_idx(0,1)] = d2_cross(0,1,i,j,k,f);// xy
+  P.Hf[sym_idx(0,2)] = d2_cross(0,2,i,j,k,f);// xz
+  P.Hf[sym_idx(1,2)] = d2_cross(1,2,i,j,k,f);// yz
+
+  P.f_here = f[idx(i,j,k)];
+}
+
+// ===== fast source using your sym_idx and comp_to_indices =====
+inline float stress_energy_PI_fast(int l, int m, const DerivPack& P) {
+  const float Htilde = ad / a;             // \tilde{\mathcal H}
+  const float invH   = 1.0f / Htilde;
+  const float coeffU = 4.0f / (3.0f * (1.0f + omega));
+
+  const float dPhi_l   = P.gf[l];
+  const float dPhi_m   = P.gf[m];
+  const float d2Phi_lm = P.Hf[sym_idx(l,m)];
+  const float dU_l     = P.gfd[l] * invH + dPhi_l;
+  const float dU_m     = P.gfd[m] * invH + dPhi_m;
+
+  return 4.0f * P.f_here * d2Phi_lm
+       + 2.0f * dPhi_l * dPhi_m
+       - coeffU * (dU_l * dU_m);
+}
+
+// Leapfrog update of field derivatives
+void evolve_derivs_PI(float d) {
+    DECLARE_INDICES
+
+    float laplnorm = pow(a, -2.0 * rescale_s) / pw2(dx);
+    
+    // Update second derivative of scale factor (ad2)
+    ad2 = - ( rescale_s - 0.5*(1-3*omega)) * pw2(ad) / a;
+
+    ad += 0.5f * d * ad2;
+
+    // Scalar field evolution
+#if parallel_calculation
+#pragma omp parallel for collapse(3)
+#endif
+    LOOP {
+        fd[idx(i,j,k)] += d * (
+            omega * laplnorm * lapl(i, j, k, f)
+            - (3. * ( 1. + omega) + rescale_s) * ad * fd[idx(i,j,k)] / a
+        );
+    }
+
+#if calculate_SIGW
+#if parallel_calculation
+#pragma omp parallel for collapse(3)
+#endif
+for (int i=0; i<N; ++i)
+for (int j=0; j<N; ++j)
+for (int k=0; k<N; ++k) {
+    const int id = idx(i,j,k);
+
+    // build derivatives once per site
+    DerivPack P; 
+    build_deriv_pack(i,j,k,P);
+
+    // bare sources (not TT-projected), explicit pairs
+    const float S_xx = stress_energy_PI_fast(0,0,P);
+    const float S_yy = stress_energy_PI_fast(1,1,P);
+    const float S_zz = stress_energy_PI_fast(2,2,P);
+    const float S_xy = stress_energy_PI_fast(0,1,P);
+    const float S_xz = stress_energy_PI_fast(0,2,P);
+    const float S_yz = stress_energy_PI_fast(1,2,P);
+
+    // RHS amplitude (C=2 convention)
+    const float srcAmp = 2.0f * pow(a, -2.0f * rescale_s);
+
+    // ---- explicit 6 component updates ----
+    // 0: xx
+    hijd[0][id] += d * (
+        laplnorm * lapl(i, j, k, hij[0])
+      - (2.0f + rescale_s) * ad * hijd[0][id] / a
+      + srcAmp * S_xx
+    );
+
+    // 1: yy
+    hijd[1][id] += d * (
+        laplnorm * lapl(i, j, k, hij[1])
+      - (2.0f + rescale_s) * ad * hijd[1][id] / a
+      + srcAmp * S_yy
+    );
+
+    // 2: zz
+    hijd[2][id] += d * (
+        laplnorm * lapl(i, j, k, hij[2])
+      - (2.0f + rescale_s) * ad * hijd[2][id] / a
+      + srcAmp * S_zz
+    );
+
+    // 3: xy
+    hijd[3][id] += d * (
+        laplnorm * lapl(i, j, k, hij[3])
+      - (2.0f + rescale_s) * ad * hijd[3][id] / a
+      + srcAmp * S_xy
+    );
+
+    // 4: xz
+    hijd[4][id] += d * (
+        laplnorm * lapl(i, j, k, hij[4])
+      - (2.0f + rescale_s) * ad * hijd[4][id] / a
+      + srcAmp * S_xz
+    );
+
+    // 5: yz
+    hijd[5][id] += d * (
+        laplnorm * lapl(i, j, k, hij[5])
+      - (2.0f + rescale_s) * ad * hijd[5][id] / a
+      + srcAmp * S_yz
+    );
+}
+#endif
+
+    ad += 0.5f * d * ad2;
+}
+
+// -------------------- Main Post-Inflation Evolution Loop --------------------
+
+void run_PI_loop(FILE* output_) {
+  int numsteps = 0;
+
+  while (a <= af) {
+    float dt_rescaled = dt * pow(astep, rescale_s - 1);
+    evolve_derivs_PI(dt_rescaled);
+    evolve_fields(dt_rescaled);
+
+    numsteps++;
+
+    if (numsteps % output_freq == 0 && a < af) {
+      save((numsteps % output_infrequent_freq == 0) ? 1 : 0);
+    }
+
+    if (screen_updates && numsteps % output_freq == 0) {
+      printf("scale factor a = %f\n", a);
+      printf("numsteps %i\n\n", numsteps);
+    }
+
+    fprintf(output_, "scale factor a = %f\n", a);
+    fprintf(output_, "numsteps %i\n\n", numsteps);
+    fflush(output_);
+
+    astep = a;
+  }
+
+  printf("Saving final inflaton data\n");
+  evolve_fields(-0.5 * dt * pow(astep, rescale_s - 1));
+  save_last();
+}
+
+
+
+////////// The rest is some unused/old functions that can come in handy
+
+// Leapfrog update of field derivatives
+void evolve_derivs_NOTUSED(float d) {
+    DECLARE_INDICES
+
+    float laplnorm = pow(a, -2.0f * rescale_s) / pw2(dx);
+    float sfev1    = rescale_s + 1.0f;
+    float sfev2    = -2.0f * rescale_s + 2.0f;
+
+    // Update second derivative of scale factor (ad2)
+    ad2 = (-2.0f * ad - 2.0f * a / d / sfev1 * (
+               1.0f - sqrt(1.0f + 2.0f * d * sfev1 * ad / a +
+               pw2(d) * sfev1 * pow(a, sfev2) *
+               (2.0f * gradient_energy() / 3.0f + potential_energy()))
+           )) / d;
+
+    ad += 0.5f * d * ad2;
+
+    // Scalar field evolution (unchanged)
+#if parallel_calculation
+#pragma omp parallel for collapse(3)
+#endif
+    LOOP {
+        fd[idx(i,j,k)] += d * (
+            laplnorm * lapl(i, j, k, f)
+            - (2.0f + rescale_s) * ad * fd[idx(i,j,k)] / a
+            - pow(a, 2.0f - 2.0f * rescale_s) * potential_derivative(i, j, k)
+        );
+    }
+
+#if calculate_SIGW
+    // Precompute RHS prefactor for the source term
+    //const float fac_source = 2.0f * pow(a, 2.0f - 2.0f * rescale_s);
+    const float fac_source = 2.0f * pow(a, -2.0f * rescale_s);
+
+    // Gravitational wave tensor evolution:
+    // compute spatial derivatives once per cell, build trace-free Pi_{ij} and update all 6 components
+#if parallel_calculation
+#pragma omp parallel for collapse(3)
+#endif
+    LOOP {
+        const int id = idx(i,j,k);
+
+        // compute tilde-derivatives once
+        float d0 = dfdx(0, i, j, k, f);
+        float d1 = dfdx(1, i, j, k, f);
+        float d2 = dfdx(2, i, j, k, f);
+
+        float grad_sq = d0*d0 + d1*d1 + d2*d2;
+        float one_third = (1.f/3.f) * grad_sq;
+
+        // Laplacians of hij components (each uses the same laplnorm)
+        // Note: lapl reads hij[comp] neighbors; kept as-is to match your stencil
+        float lap_h0 = lapl(i, j, k, hij[0]); // xx
+        float lap_h1 = lapl(i, j, k, hij[1]); // yy
+        float lap_h2 = lapl(i, j, k, hij[2]); // zz
+        float lap_h3 = lapl(i, j, k, hij[3]); // xy
+        float lap_h4 = lapl(i, j, k, hij[4]); // xz
+        float lap_h5 = lapl(i, j, k, hij[5]); // yz
+
+        // friction factor for h' term (same as scalar)
+        float fric_common = (2.0f + rescale_s) * ad / a;
+
+        // compute source (trace-free Pi components in tilde indices)
+        float Pi_xx = d0 * d0 - one_third;
+        float Pi_yy = d1 * d1 - one_third;
+        float Pi_zz = d2 * d2 - one_third;
+        float Pi_xy = d0 * d1;
+        float Pi_xz = d0 * d2;
+        float Pi_yz = d1 * d2;
+
+        // update hijd components (leapfrog style update of derivatives)
+        hijd[0][id] += d * (
+            laplnorm * lap_h0
+            - fric_common * hijd[0][id] 
+            + fac_source * Pi_xx
+        );
+
+        hijd[1][id] += d * (
+            laplnorm * lap_h1
+            - fric_common * hijd[1][id] 
+            + fac_source * Pi_yy
+        );
+
+        hijd[2][id] += d * (
+            laplnorm * lap_h2
+            - fric_common * hijd[2][id] 
+            + fac_source * Pi_zz
+        );
+
+        hijd[3][id] += d * (
+            laplnorm * lap_h3
+            - fric_common * hijd[3][id] 
+            + fac_source * Pi_xy
+        );
+
+        hijd[4][id] += d * (
+            laplnorm * lap_h4
+            - fric_common * hijd[4][id] 
+            + fac_source * Pi_xz
+        );
+
+        hijd[5][id] += d * (
+            laplnorm * lap_h5
+            - fric_common * hijd[5][id] 
+            + fac_source * Pi_yz
+        );
+    }
+#endif
+
+    ad += 0.5f * d * ad2;
+}

@@ -7,7 +7,7 @@
 #define perform_deltaN 0
 
 /// Set to 1 to enable OpenMP parallelism in selected loops (if supported by the compiler)
-#define parallel_calculation 1
+#define parallel_calculation 0
 
 // Set to 1 to enable the calculation of SIGWs
 #define calculate_SIGW 1
@@ -98,7 +98,7 @@ const int output_spectra = 1;
 const int output_histogram = 1;
 const int output_energy = 1;
 const int output_box3D = 0;
-const int output_box2D = 1;
+const int output_box2D = 0;
 const int output_bispectrum = 0;
 
 #if perform_deltaN
