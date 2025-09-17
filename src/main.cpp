@@ -59,6 +59,22 @@ bool ensure_results_directory() {
   return true;
 }
 
+// Ensure the 'results/post_inflation' subdirectory exists
+bool ensure_post_inflation_directory() {
+  const char* path = "results/post_inflation";
+  struct stat info;
+  if (stat(path, &info) != 0) {
+    if (mkdir(path, 0777) != 0) {
+      std::cerr << "Failed to create '" << path << "' directory.\n";
+      return false;
+    }
+  } else if (!(info.st_mode & S_IFDIR)) {
+    std::cerr << "'" << path << "' exists but is not a directory.\n";
+    return false;
+  }
+  return true;
+}
+
 // Load a text file of floats into a std::vector
 void load_vector(const std::string& filename, std::vector<float>& vec) {
   std::ifstream infile(filename);
@@ -84,8 +100,13 @@ int main() {
   }
 
   if (!ensure_results_directory()) {
+  return 1;
+  }
+  #if post_inflation
+  if (!ensure_post_inflation_directory()) {
     return 1;
   }
+  #endif
 
   FILE* output_ = fopen("results/output.txt", "w");
   if (!output_) {
@@ -102,6 +123,10 @@ int main() {
 
 #if perform_deltaN
   run_deltaN_loop(output_);    // Run the deltaN evolution loop
+#endif
+
+#if post_inflation
+  run_post_inflation_loop(output_);    // Run the post inflation evolution loop
 #endif
 
   output_parameters();

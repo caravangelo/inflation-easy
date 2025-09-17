@@ -39,7 +39,6 @@ void initialize_simulation() {
   output_parameters(); // Save run configuration
   save(1);             // First output
   t = t0;              // Set initial time
-  evolve_fields(0.5 * dt); // First leapfrog step
 }
 
 // -------------------- Field Mode Initialization --------------------
@@ -232,5 +231,36 @@ void initializeGW() {
     hij[c].assign(gs, 0.0);   // size to gs and zero all entries
     hijd[c].assign(gs, 0.0);
   }
+}
+#endif
+
+#if post_inflation
+void initialize_post_inflation() {
+
+  t0 = 0;
+
+  const size_t gs = static_cast<size_t>(N) * N * N;
+  for (int c = 0; c < 6; ++c) {
+    hij[c].assign(gs, 0.0);   // size to gs and zero all entries
+    hijd[c].assign(gs, 0.0);
+  }
+
+  DECLARE_INDICES
+  #if perform_deltaN
+  LOOP f[idx(i,j,k)] = 2. /3. * deltaN[idx(i,j,k)];
+  #else
+  float fmean = 0;
+  LOOP fmean += f[idx(i,j,k)];
+  fmean = fmean / (float)gridsize;
+  LOOP f[idx(i,j,k)] = 2. /3. * (f[idx(i,j,k)] - fmean) / (fd[idx(i,j,k)] * pow(a, rescale_s - 1) / (ad * pow(a, rescale_s - 2.)));
+  #endif
+
+  fd.resize(N * N * N, 0.0);
+
+  a = 1;
+  float factor = 1.; // factor = 1 sets the smallest mode the size of the horizon
+  ad = factor * 2. * pi / L; //setting ad is delicate, think 
+
+  save_post_inflation(1);
 }
 #endif

@@ -12,6 +12,9 @@
 // Set to 1 to enable the calculation of SIGWs
 #define calculate_SIGW 1
 
+// Set to 1 to enable the post-inflation calculation of SIGWs
+#define post_inflation 1
+
 // -------------------- Lattice and Evolution Parameters --------------------
 
 // Number of points along each spatial dimension (total lattice points will be N^3)
@@ -52,6 +55,12 @@ const float Nend = 2.;   // Final e-folding time for deltaN run
 #define monotonic_potential 1
 #define antimonotonic_potential 0
 
+#endif
+
+#if post_inflation
+const float omega = 1./3.;
+const float dt_post_inflation = 0.01;
+const float af_post_inflation = 200;
 #endif
 
 #else

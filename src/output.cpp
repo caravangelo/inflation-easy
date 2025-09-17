@@ -1602,3 +1602,706 @@ void saveN()
         evolve_fieldsN(.5 * dN);
 }
 #endif
+
+
+// Post-Inflation part of the output code
+//
+//
+//
+//
+
+
+// Computes spatial averages and variances of the field and its derivative
+void meansvars_post_inflation(int flush)
+{
+    static FILE *means_, *vars_, *velocity_;
+    DECLARE_INDICES
+
+    float av, var, vel;
+
+    static int first = 1;
+    if (first) // Open output files
+    {
+        snprintf(name_, sizeof(name_), "results/post_inflation/means%s", ext_);
+        means_ = fopen(name_, mode_);
+        snprintf(name_, sizeof(name_), "results/post_inflation/variance%s", ext_);
+        vars_ = fopen(name_, mode_);
+        snprintf(name_, sizeof(name_), "results/post_inflation/velocity%s", ext_);
+        velocity_ = fopen(name_, mode_);
+        first = 0;
+    }
+
+    fprintf(means_, "%f", t);
+    fprintf(means_, " %e", a);
+    fprintf(velocity_, "%f", t);
+    fprintf(velocity_, " %e", a);
+    fprintf(vars_, "%f", t);
+    fprintf(vars_, " %e", a);
+
+    av = 0.;
+    vel = 0.;
+    var = 0.;
+    // Calculate field mean
+    LOOP
+    {
+        av += f[idx(i,j,k)];
+        vel += fd[idx(i,j,k)];
+        var += pw2(f[idx(i,j,k)]);
+    }
+    av = av / (float)gridsize; // Convert sum to average
+    vel = vel / (float)gridsize;
+
+    vel = vel * pow(a, rescale_s - 1) * rescale_B;
+
+    fprintf(means_, " %e", av);
+    fprintf(velocity_, " %e", vel);
+    fprintf(vars_, " %e", var - pw2(av));
+    // Check for instability. See if the field has grown exponentially and become non-numerical at any point.
+    if (av + FLT_MAX == av || (av != 0. && av / av != 1.))
+    {
+        printf("Unstable solution developed. Scalar field not numerical at t=%f\n", t);
+        output_parameters();
+        fflush(means_);
+        fflush(vars_);
+        exit(1);
+    }
+
+    fprintf(means_, "\n");
+    fprintf(vars_, "\n");
+    fprintf(velocity_, "\n");
+    if (flush)
+    {
+        fflush(means_);
+        fflush(vars_);
+        fflush(velocity_);
+    }
+}
+
+// Outputs the time and the physical quantities a, adot/a (i.e. Hubble), and adotdot
+void scale_post_inflation(int flush)
+{
+    static FILE *sf_;
+
+    static int first = 1;
+    if (first) // Open output file
+    {
+        snprintf(name_, sizeof(name_), "results/post_inflation/sf%s", ext_);
+        sf_ = fopen(name_, mode_);
+        first = 0;
+    }
+
+    // Output a, H, and adotdot in physical units using rescalings
+    fprintf(sf_, "%f %f %e %e\n",
+            t, a,
+            ad * rescale_B * pow(a, rescale_s - 2.),
+            pw2(rescale_B) * pow(a, 2. * rescale_s - 2.) *
+                (ad2 + (rescale_s - 1.) * pw2(ad) / a));
+
+    if (flush)
+        fflush(sf_);
+}
+
+// Outputs power spectrum of the field and applies a high-momentum cutoff if enabled
+void spectraf_post_inflation()
+{
+    static FILE *spectra_, *spectratimes_; // Output files for power spectra and times at which spectra were taken
+    const int maxnumbins = (int)(1.73205 * (N / 2)) + 1; // Number of bins = sqrt(3)*(N/2)+1 for 3D.
+    int numpoints[maxnumbins]; // Number of points in each momentum bin
+    float p[maxnumbins], f2[maxnumbins]; // Values for each bin: Momentum, |f_k|^2
+    int numbins = maxnumbins; // Use maxnumbins for consistency
+    float pmagnitude; // Total momentum (p) in units of lattice spacing
+    float pdisc;
+    float dp = 2. * pi / L; // Grid spacing in momentum space
+    float fp2; // Square magnitude of field (fp2) for a given mode
+    int i, j, k, px, py, pz, iconj, jconj;
+    float norm1 = pow(L / rescale_B, 3) / pow(N, 6); // Normalization to reduced Planck mass units
+
+    int arraysize[] = {N, N, N};
+
+    static int first = 1;
+    if (first)
+    {
+        snprintf(name_, sizeof(name_), "results/post_inflation/spectra%s", ext_);
+        spectra_ = fopen(name_, mode_);
+
+        snprintf(name_, sizeof(name_), "results/post_inflation/spectratimes%s", ext_);
+        spectratimes_ = fopen(name_, mode_);
+        first = 0;
+    }
+
+    for (i = 0; i < numbins; i++)
+        p[i] = dp * i;
+
+    for (i = 0; i < numbins; i++)
+    {
+        numpoints[i] = 0;
+        f2[i] = 0.;
+    }
+
+    fftrn(f.data(), (float *)fnyquist_p, 3, arraysize, 1);
+
+    for (i = 0; i < N; i++)
+    {
+        px = (i <= N / 2 ? i : i - N);
+        for (j = 0; j < N; j++)
+        {
+            py = (j <= N / 2 ? j : j - N);
+            for (k = 1; k < N / 2; k++)
+            {
+                pz = k;
+                pmagnitude = sqrt(pw2(px) + pw2(py) + pw2(pz));
+
+                int bin = (int)lroundf(pmagnitude);  // Use round instead of truncation
+                if (bin >= numbins) continue;          // Skip out-of-range bins
+
+                fp2 = pw2(f[idx(i,j,2 * k)]) + pw2(f[idx(i,j,2 * k + 1)]);
+                numpoints[bin] += 2;
+                f2[bin] += 2. * fp2;
+            }
+            for (k = 0; k <= N / 2; k += N / 2)
+            {
+                pz = k;
+                pmagnitude = sqrt(pw2(px) + pw2(py) + pw2(pz));
+
+                int bin = (int)lroundf(pmagnitude);
+                if (bin >= numbins) continue;
+
+                if (k == 0)
+                {
+                    fp2 = pw2(f[idx(i,j,0)]) + pw2(f[idx(i,j,1)]);
+                }
+                else
+                {
+                    fp2 = pw2(fnyquist_p[i][2 * j]) + pw2(fnyquist_p[i][2 * j + 1]);
+                }
+                numpoints[bin]++;
+                f2[bin] += fp2;
+            }
+        }
+    }
+
+    for (i = 0; i < numbins; i++)
+    {
+        if (numpoints[i] > 0)
+        {
+            f2[i] = f2[i] / numpoints[i];
+        }
+        fprintf(spectra_, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
+    }
+
+    if (high_cutoff_index > 0 && forcing_cutoff)
+    {
+        fftrn(fd.data(), (float *)fdnyquist_p, 3, arraysize, 1);
+        for (i = 0; i < N; i++)
+        {
+            px = (i <= N / 2 ? i : i - N);
+            iconj = (i == 0 ? 0 : N - i);
+            for (j = 0; j < N; j++)
+            {
+                py = (j <= N / 2 ? j : j - N);
+                for (k = 1; k < N / 2; k++)
+                {
+                    pz = k;
+                    pdisc = sqrt(pw2(px) + pw2(py) + pw2(pz));
+                    if (pdisc > high_cutoff_index || pdisc < low_cutoff_index)
+                    {
+                        kill_mode(&f[idx(i,j,2 * k)], &fd[idx(i,j,2 * k)]);
+                    }
+                }
+
+                if (j > N / 2 || (i > N / 2 && (j == 0 || j == N / 2)))
+                {
+                    jconj = (j == 0 ? 0 : N - j);
+
+                    pdisc = sqrt(pw2(px) + pw2(py));
+                    if (pdisc > high_cutoff_index || pdisc < low_cutoff_index)
+                    {
+                        kill_mode(&f[idx(i,j,0)], &fd[idx(i,j,0)]);
+                        f[idx(iconj,jconj,0)] = f[idx(i,j,0)];
+                        f[idx(iconj,jconj,1)] = -f[idx(i,j,1)];
+                        fd[idx(iconj,jconj,0)] = fd[idx(i,j,0)];
+                        fd[idx(iconj,jconj,1)] = -fd[idx(i,j,1)];
+                    }
+
+                    pdisc = sqrt(pw2(px) + pw2(py) + pw2(N / 2.));
+                    if (pdisc > high_cutoff_index || pdisc < low_cutoff_index)
+                    {
+                        kill_mode(&fnyquist_p[i][2 * j], &fdnyquist_p[i][2 * j]);
+                        fnyquist_p[iconj][2 * jconj] = fnyquist_p[i][2 * j];
+                        fnyquist_p[iconj][2 * jconj + 1] = -fnyquist_p[i][2 * j + 1];
+                        fdnyquist_p[iconj][2 * jconj] = fdnyquist_p[i][2 * j];
+                        fdnyquist_p[iconj][2 * jconj + 1] = -fdnyquist_p[i][2 * j + 1];
+                    }
+                }
+                else if ((i == 0 || i == N / 2) && (j == 0 || j == N / 2))
+                {
+                    pdisc = sqrt(pw2(px) + pw2(py));
+                    if (pdisc > high_cutoff_index || pdisc < low_cutoff_index)
+                    {
+                        kill_mode(&f[idx(i,j,0)], &fd[idx(i,j,0)]);
+                    }
+
+                    pdisc = sqrt(pw2(px) + pw2(py) + pw2(N / 2.));
+                    if (pdisc > high_cutoff_index || pdisc < low_cutoff_index)
+                    {
+                        kill_mode(&fnyquist_p[i][2 * j], &fdnyquist_p[i][2 * j]);
+                    }
+                }
+            }
+        }
+        fftrn(fd.data(), (float *)fdnyquist_p, 3, arraysize, -1);
+    }
+
+    fftrn(f.data(), (float *)fnyquist_p, 3, arraysize, -1);
+
+    fprintf(spectra_, "\n");
+    fflush(spectra_);
+    fprintf(spectratimes_, "%f %e\n", t, a);
+    fflush(spectratimes_);
+
+    return;
+}
+
+// ------------------------- P_h(k) with Λ–contraction -------------------------
+void spectraGW_post_inflation()
+{
+    static FILE *spectraGW_ = nullptr;
+    static int first = 1;
+
+    const int   numbins = (int)(sqrt(3.0) * (N/2)) + 1;
+    const int i_max_out = (int)floor(0.90 * (N/2));   // keep up to 90% of Nyquist
+    const float dp      = 2.f * pi / L;
+
+    std::vector<int>   numpoints(numbins, 0);
+    std::vector<float> p(numbins, 0.f), f2(numbins, 0.f);
+    for (int i = 0; i < numbins; ++i) p[i] = dp * i;
+
+    if (first) {
+        snprintf(name_, sizeof(name_), "results/post_inflation/spectraGW%s", ext_);
+        spectraGW_ = fopen(name_, mode_);
+        first = 0;
+    }
+
+    // --- FFT to k-space (Nyquist planes in scratch) ---
+    
+    int arraysize[] = {N, N, N};
+    for (int c = 0; c < 6; ++c) fftrn(hij[c].data(), (float*)hijnyquist_p[c], 3, arraysize, 1);
+
+    // --- loop over modes ---
+    for (int i = 0; i < N; ++i) {
+        int px = (i <= N/2 ? i : i - N);
+        for (int j = 0; j < N; ++j) {
+            int py = (j <= N/2 ? j : j - N);
+
+            // interior (double-counted)
+            for (int k = 1; k < N/2; ++k) {
+                int pz = k;
+
+                // lattice k and |k|
+                float kx = (2.f/dx) * sin(pi * px / N);
+                float ky = (2.f/dx) * sin(pi * py / N);
+                float kz = (2.f/dx) * sin(pi * pz / N);
+                float kt2 = kx*kx + ky*ky + kz*kz;
+                if (kt2 == 0.f) continue;
+
+                int   bin = (int)lround(sqrt((float)(px*px + py*py + pz*pz)));
+                if (bin >= i_max_out) continue;
+
+                // read C_ij = h_ij(k) (complex) from hij (interior)
+                int idx_mode = idx(i, j, 2*k);
+                float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
+                for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
+                    int comp = sym_idx(l, m);
+                    float re = hij[comp][idx_mode];
+                    float im = hij[comp][idx_mode + 1];
+                    C_re[l][m] = re; C_im[l][m] = im;
+                    if (m != l) { C_re[m][l] = re; C_im[m][l] = im; }
+                }
+
+                // projector pieces
+                float inv = 1.0f / sqrt(kt2);
+                float kh[3] = {kx*inv, ky*inv, kz*inv};
+                float P[3][3];
+                for (int a=0;a<3;++a) for (int b=0;b<3;++b)
+                    P[a][b] = (a==b?1.f:0.f) - kh[a]*kh[b];
+
+                // A = P C P  and  T = Tr(P C)
+                float A_re[3][3] = {{0}}, A_im[3][3] = {{0}};
+                float T_re = 0.f, T_im = 0.f;
+                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
+                    float r=0.f, im=0.f;
+                    for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
+                        float pal = P[a][l], pbm = P[b][m];
+                        r  += pal * C_re[l][m] * pbm;
+                        im += pal * C_im[l][m] * pbm;
+                    }
+                    A_re[a][b]=r; A_im[a][b]=im;
+                }
+                for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
+                    T_re += P[l][m]*C_re[l][m];
+                    T_im += P[l][m]*C_im[l][m];
+                }
+
+                // Λ–contraction: sum |A - 0.5 P T|^2
+                float fp2 = 0.f;
+                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
+                    float r = A_re[a][b] - 0.5f*P[a][b]*T_re;
+                    float im= A_im[a][b] - 0.5f*P[a][b]*T_im;
+                    fp2 += r*r + im*im;
+                }
+
+                numpoints[bin] += 2;
+                f2[bin]        += 2.f * fp2;
+            }
+
+            // 0 and Nyquist planes (single-counted)
+            for (int k = 0; k <= N/2; k += N/2) {
+                int pz = k;
+
+                float kx = (2.f/dx) * sin(pi * px / N);
+                float ky = (2.f/dx) * sin(pi * py / N);
+                float kz = (2.f/dx) * sin(pi * pz / N);
+                float kt2 = kx*kx + ky*ky + kz*kz;
+                if (kt2 == 0.f) continue;
+
+                int bin = (int)lround(sqrt((float)(px*px + py*py + pz*pz)));
+                if (bin >= i_max_out) continue;
+
+                float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
+                if (k == 0) {
+                    int idx_mode = idx(i, j, 0);
+                    for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
+                        int comp = sym_idx(l, m);
+                        float re = hij[comp][idx_mode];
+                        float im = hij[comp][idx_mode + 1];
+                        C_re[l][m]=re; C_im[l][m]=im;
+                        if (m!=l){ C_re[m][l]=re; C_im[m][l]=im; }
+                    }
+                } else { // Nyquist plane stored in scratch
+                    int j2 = 2*j;
+                    for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
+                        int comp = sym_idx(l, m);
+                        float re = hijnyquist_p[comp][i][j2];
+                        float im = hijnyquist_p[comp][i][j2 + 1];
+                        C_re[l][m]=re; C_im[l][m]=im;
+                        if (m!=l){ C_re[m][l]=re; C_im[m][l]=im; }
+                    }
+                }
+
+                float inv = 1.0f / sqrt(kt2);
+                float kh[3] = {kx*inv, ky*inv, kz*inv};
+                float P[3][3];
+                for (int a=0;a<3;++a) for (int b=0;b<3;++b)
+                    P[a][b] = (a==b?1.f:0.f) - kh[a]*kh[b];
+
+                float A_re[3][3] = {{0}}, A_im[3][3] = {{0}};
+                float T_re = 0.f, T_im = 0.f;
+                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
+                    float r=0.f, im=0.f;
+                    for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
+                        float pal=P[a][l], pbm=P[b][m];
+                        r  += pal*C_re[l][m]*pbm;
+                        im += pal*C_im[l][m]*pbm;
+                    }
+                    A_re[a][b]=r; A_im[a][b]=im;
+                }
+                for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
+                    T_re += P[l][m]*C_re[l][m];
+                    T_im += P[l][m]*C_im[l][m];
+                }
+
+                float fp2 = 0.f;
+                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
+                    float r = A_re[a][b] - 0.5f*P[a][b]*T_re;
+                    float im= A_im[a][b] - 0.5f*P[a][b]*T_im;
+                    fp2 += r*r + im*im;
+                }
+
+                numpoints[bin] += 1;
+                f2[bin]        += fp2;
+            }
+        }
+    }
+
+    // write (normalization: keep your convention if you had one)
+    const float norm1 = 1.0f; // replace with your previous norm if desired
+    for (int i = 0; i < numbins; ++i) {
+        if (numpoints[i] > 0) f2[i] /= numpoints[i];
+        fprintf(spectraGW_, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
+    }
+    fprintf(spectraGW_, "\n");
+    fflush(spectraGW_);
+
+    // restore to real space
+    for (int c = 0; c < 6; ++c) fftrn(hij[c].data(), (float*)hijnyquist_p[c], 3, arraysize, -1);
+}
+
+// --------------- a^4 P_{Omega_GW}(k) with Λ–contraction ---------------------
+void spectraOmegaGW_post_inflation()
+{
+    static FILE *spectraOmegaGW_ = nullptr;
+    static int first = 1;
+
+    const int   numbins = (int)(sqrt(3.0) * (N/2)) + 1;
+    const int i_max_out = (int)floor(0.90 * (N/2));   // keep up to 90% of Nyquist
+    const float dp      = 2.f * pi / L;
+
+    std::vector<int>   numpoints(numbins, 0);
+    std::vector<float> p(numbins, 0.f), f2(numbins, 0.f);
+    for (int i = 0; i < numbins; ++i) p[i] = dp * i;
+
+    if (first) {
+        snprintf(name_, sizeof(name_), "results/post_inflation/spectraOmegaGW%s", ext_);
+        spectraOmegaGW_ = fopen(name_, mode_);
+        first = 0;
+    }
+
+    // FFT to k-space for hdot_ij
+ 
+    int arraysize[] = {N, N, N};
+    for (int c = 0; c < 6; ++c) fftrn(hijd[c].data(), (float*)hijdnyquist_p[c], 3, arraysize, 1);
+
+    // conformal -> physical time derivative factor (your convention)
+    const float to_phys = rescale_B * pow(a, rescale_s - 1.f);
+
+    for (int i = 0; i < N; ++i) {
+        int px = (i <= N/2 ? i : i - N);
+        for (int j = 0; j < N; ++j) {
+            int py = (j <= N/2 ? j : j - N);
+
+            for (int k = 1; k < N/2; ++k) {
+                int pz = k;
+
+                float kx = (2.f/dx) * sin(pi * px / N);
+                float ky = (2.f/dx) * sin(pi * py / N);
+                float kz = (2.f/dx) * sin(pi * pz / N);
+                float kt2 = kx*kx + ky*ky + kz*kz;
+                if (kt2 == 0.f) continue;
+
+                int bin = (int)lround(sqrt((float)(px*px + py*py + pz*pz)));
+                if (bin >= i_max_out) continue;
+
+                int idx_mode = idx(i, j, 2*k);
+                float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
+                for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
+                    int comp = sym_idx(l, m);
+                    float re = hijd[comp][idx_mode]     * to_phys;
+                    float im = hijd[comp][idx_mode + 1] * to_phys;
+                    C_re[l][m]=re; C_im[l][m]=im;
+                    if (m!=l){ C_re[m][l]=re; C_im[m][l]=im; }
+                }
+
+                float inv = 1.0f / sqrt(kt2);
+                float kh[3] = {kx*inv, ky*inv, kz*inv};
+                float P[3][3];
+                for (int a=0;a<3;++a) for (int b=0;b<3;++b)
+                    P[a][b] = (a==b?1.f:0.f) - kh[a]*kh[b];
+
+                float A_re[3][3] = {{0}}, A_im[3][3] = {{0}};
+                float T_re = 0.f, T_im = 0.f;
+                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
+                    float r=0.f, im=0.f;
+                    for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
+                        float pal=P[a][l], pbm=P[b][m];
+                        r  += pal*C_re[l][m]*pbm;
+                        im += pal*C_im[l][m]*pbm;
+                    }
+                    A_re[a][b]=r; A_im[a][b]=im;
+                }
+                for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
+                    T_re += P[l][m]*C_re[l][m];
+                    T_im += P[l][m]*C_im[l][m];
+                }
+
+                float fp2 = 0.f;
+                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
+                    float r = A_re[a][b] - 0.5f*P[a][b]*T_re;
+                    float im= A_im[a][b] - 0.5f*P[a][b]*T_im;
+                    fp2 += r*r + im*im;
+                }
+
+                numpoints[bin] += 2;
+                f2[bin]        += 2.f * fp2;
+            }
+
+            for (int k = 0; k <= N/2; k += N/2) {
+                int pz = k;
+
+                float kx = (2.f/dx) * sin(pi * px / N);
+                float ky = (2.f/dx) * sin(pi * py / N);
+                float kz = (2.f/dx) * sin(pi * pz / N);
+                float kt2 = kx*kx + ky*ky + kz*kz;
+                if (kt2 == 0.f) continue;
+
+                int bin = (int)lround(sqrt((float)(px*px + py*py + pz*pz)));
+                if (bin >= i_max_out) continue;
+
+                float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
+                if (k == 0) {
+                    int idx_mode = idx(i, j, 0);
+                    for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
+                        int comp = sym_idx(l, m);
+                        float re = hijd[comp][idx_mode]     * to_phys;
+                        float im = hijd[comp][idx_mode + 1] * to_phys;
+                        C_re[l][m]=re; C_im[l][m]=im;
+                        if (m!=l){ C_re[m][l]=re; C_im[m][l]=im; }
+                    }
+                } else {
+                    int j2 = 2*j;
+                    for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
+                        int comp = sym_idx(l, m);
+                        float re = hijdnyquist_p[comp][i][j2]     * to_phys;
+                        float im = hijdnyquist_p[comp][i][j2 + 1] * to_phys;
+                        C_re[l][m]=re; C_im[l][m]=im;
+                        if (m!=l){ C_re[m][l]=re; C_im[m][l]=im; }
+                    }
+                }
+
+                float inv = 1.0f / sqrt(kt2);
+                float kh[3] = {kx*inv, ky*inv, kz*inv};
+                float P[3][3];
+                for (int a=0;a<3;++a) for (int b=0;b<3;++b)
+                    P[a][b] = (a==b?1.f:0.f) - kh[a]*kh[b];
+
+                float A_re[3][3] = {{0}}, A_im[3][3] = {{0}};
+                float T_re = 0.f, T_im = 0.f;
+                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
+                    float r=0.f, im=0.f;
+                    for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
+                        float pal=P[a][l], pbm=P[b][m];
+                        r  += pal*C_re[l][m]*pbm;
+                        im += pal*C_im[l][m]*pbm;
+                    }
+                    A_re[a][b]=r; A_im[a][b]=im;
+                }
+                for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
+                    T_re += P[l][m]*C_re[l][m];
+                    T_im += P[l][m]*C_im[l][m];
+                }
+
+                float fp2 = 0.f;
+                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
+                    float r = A_re[a][b] - 0.5f*P[a][b]*T_re;
+                    float im= A_im[a][b] - 0.5f*P[a][b]*T_im;
+                    fp2 += r*r + im*im;
+                }
+
+                numpoints[bin] += 1;
+                f2[bin]        += fp2;
+            }
+        }
+    }
+
+    const float norm1 = 1.0f; // replace with your previous norm if desired
+    for (int i = 0; i < numbins; ++i) {
+        if (numpoints[i] > 0) f2[i] /= numpoints[i];
+        fprintf(spectraOmegaGW_, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
+    }
+    fprintf(spectraOmegaGW_, "\n");
+    fflush(spectraOmegaGW_);
+
+    for (int c = 0; c < 6; ++c) fftrn(hijd[c].data(), (float*)hijdnyquist_p[c], 3, arraysize, -1);
+}
+
+void histograms_post_inflation()
+{
+    static FILE *histogram_, *histogramtimes_;
+    int i = 0, j = 0, k = 0;
+    int binnum; // Index of bin for a given field value
+    float binfreq[nbins]; // The frequency of field values occurring within each bin
+    float bmin, bmax, df; // Minimum and maximum field values for each field and spacing (in field values) between bins
+    int numpts; // Count the number of points in the histogram for each field. (Should be all lattice points unless explicit field limits are given.)
+
+    static int first = 1;
+    if (first) // Open output files
+    {
+        snprintf(name_, sizeof(name_), "results/post_inflation/histogram%s", ext_);
+        histogram_ = fopen(name_, mode_);
+
+        snprintf(name_, sizeof(name_), "results/post_inflation/histogramtimes%s", ext_);
+        histogramtimes_ = fopen(name_, mode_);
+        first = 0;
+    }
+
+    fprintf(histogramtimes_, "%f", t); // Output time at which histograms were recorded
+    fprintf(histogramtimes_, " %e", a);
+
+    i = 0;
+    j = 0;
+    k = 0;
+    bmin = f[idx(i,j,k)];
+    bmax = bmin;
+    LOOP
+    {
+        bmin = (f[idx(i,j,k)] < bmin ? f[idx(i,j,k)] : bmin);
+        bmax = (f[idx(i,j,k)] > bmax ? f[idx(i,j,k)] : bmax);
+    }
+
+    // Find the difference (in field value) between successive bins
+    df = (bmax - bmin) / (float)(nbins); // bmin will be at the bottom of the first bin and bmax at the top of the last
+
+    // Initialize all frequencies to zero
+    for (i = 0; i < nbins; i++)
+        binfreq[i] = 0.;
+
+    // Iterate over grid to determine bin frequencies
+    numpts = 0;
+    LOOP
+    {
+        binnum = (int)((f[idx(i,j,k)] - bmin) / df); // Find index of bin for each value
+        if (f[idx(i,j,k)] == bmax) // The maximal field value is at the top of the highest bin
+            binnum = nbins - 1;
+        if (binnum >= 0 && binnum < nbins) // Increment frequency in the appropriate bin
+        {
+            binfreq[binnum]++;
+            numpts++;
+        }
+    } // End of loop over grid
+
+    // Output results
+    for (i = 0; i < nbins; i++)
+        fprintf(histogram_, "%e\n", binfreq[i] / (float)numpts); // Output bin frequency normalized so the total equals 1
+    fprintf(histogram_, "\n"); // Stick a blank line between times to make the file more readable
+    fflush(histogram_);
+    fprintf(histogramtimes_, " %e %e", bmin, df); // Output the starting point and stepsize for the bins at each time
+
+    fprintf(histogramtimes_, "\n");
+    fflush(histogramtimes_);
+}
+
+// Calculate and save quantities
+void save_post_inflation(int infrequent)
+{
+    if (t > 0.) // Synchronize field values and derivatives
+        evolve_fields(-.5 * dt * pow(astep, rescale_s - 1));
+
+    meansvars_post_inflation(infrequent);
+    scale_post_inflation(infrequent);
+
+    // Infrequent calculations
+    if (infrequent)
+    {
+        //if (output_box3D)
+        //    box();
+        //if (output_box2D)
+        //{
+        //    box2d();
+        //    box2dot();
+        //}
+        //if (output_energy)
+        //    energy();
+        if (output_spectra)
+        {
+            spectraf_post_inflation();
+        #if calculate_SIGW
+            spectraGW_post_inflation();
+            spectraOmegaGW_post_inflation();
+        #endif
+        }
+        if (output_histogram)
+            histograms_post_inflation();
+    }
+
+    if (t > 0.) // Desynchronize field values and derivatives
+        evolve_fields(.5 * dt * pow(astep, rescale_s - 1));
+}

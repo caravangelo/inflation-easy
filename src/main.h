@@ -121,8 +121,10 @@ extern std::vector<float> potential_derivative_numerical; // dV/dϕ values
 void initialize();               // Basic parameter checks and hubble_init
 void initializef();              // Generate vacuum fluctuations
 void initializeGW(); 
-void initializeN();              // Setup for deltaN calculation
 void initialize_simulation();    // Full initialization pipeline
+void initializeN();              // Setup for deltaN calculation
+void initialize_post_inflation();// Post inflation initialization pipeline
+
 
 // Field evolution
 void evolve_fields(float d);     // Evolve f with step d
@@ -142,10 +144,11 @@ float potential_derivative(int i, int j, int k);    // ∂V/∂ϕ at a grid poin
 float pot_ratio(int i, int j, int k);               // ∂V/∂ϕ / V
 
 // Output routines
-void output_parameters();       // Write simulation parameters to file
-void save(int force);           // Save observables (means, spectra, etc.)
-void save_last();               // Final snapshot
-void saveN();                   // Save for deltaN evolution
+void output_parameters();               // Write simulation parameters to file
+void save(int force);                   // Save observables (means, spectra, etc.)
+void save_last();                       // Final snapshot
+void saveN();                           // Save for deltaN evolution
+void save_post_inflation(int force);    // Save for post inflation evolution
 
 // Utilities
 void fftrn(float f[], float fnyquist[], int ndims, int size[], int forward); // Real FFT
@@ -156,4 +159,7 @@ bool ensure_results_directory();                                             // 
 void run_evolution_loop(FILE* output_);
 #if perform_deltaN
 void run_deltaN_loop(FILE* output_);
+#endif
+#if post_inflation
+void run_post_inflation_loop(FILE* output_);
 #endif
