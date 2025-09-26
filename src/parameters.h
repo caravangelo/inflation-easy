@@ -7,7 +7,7 @@
 #define perform_deltaN 0
 
 /// Set to 1 to enable OpenMP parallelism in selected loops (if supported by the compiler)
-#define parallel_calculation 0
+#define parallel_calculation 1
 
 // Set to 1 to enable the calculation of SIGWs
 #define calculate_SIGW 1
@@ -38,7 +38,7 @@ const float V0 = 3e-9; // Potential parameter
 const float rescale_B = sqrt(V0); // Rescaling factor (see doc)
 const float initial_field = 2.9181235049318586; // Initial field value
 const float initial_derivative = -0.06727651095116181; // Initial field velocity (in code units)
-const float L = 2.; //10 Comoving box size in code units (must be sub-horizon at start)
+const float L = 10.; //10 Comoving box size in code units (must be sub-horizon at start)
 const float dt = 0.001; // Time step
 // Output frequency in time steps (standard and infrequent quantities)
 const int output_freq = 100;
@@ -59,7 +59,7 @@ const float Nend = 2.;   // Final e-folding time for deltaN run
 
 #if post_inflation
 const float omega = 1./3.;
-const float dt_post_inflation = 0.01;
+const float dt_post_inflation = 0.001;
 const float af_post_inflation = 200;
 #endif
 

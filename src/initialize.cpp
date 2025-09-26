@@ -258,7 +258,7 @@ void initialize_post_inflation() {
   fd.resize(N * N * N, 0.0);
 
   a = 1;
-  float factor = 1.; // factor = 1 sets the smallest mode the size of the horizon
+  float factor = 1. * N; // factor = 1 sets the smallest mode the size of the horizon
   ad = factor * 2. * pi / L; //setting ad is delicate, think 
 
   save_post_inflation(1);
