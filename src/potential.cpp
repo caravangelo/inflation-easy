@@ -11,12 +11,12 @@
 // Analytic potential (default: quadratic V(ϕ) = 1/2 m²ϕ²)
 // -------------------------------------------------------------
 
-float analytic_potential(float field_value) {
-    return V0 * (1. - (1. - ns) / 4. * pw2(field_value)) / pw2(rescale_B);
+double analytic_potential(double field_value) {
+    return V0 * (1.0 - (1.0 - ns) / 4.0 * pw2(field_value)) / pw2(rescale_B);
 }
 
-float analytic_potential_derivative(float field_value) {
-    return -V0 * (1. - ns) / 2. * field_value / pw2(rescale_B);
+double analytic_potential_derivative(double field_value) {
+    return -V0 * (1.0 - ns) / 2.0 * field_value / pw2(rescale_B);
 }
 #endif
 
@@ -25,7 +25,7 @@ float analytic_potential_derivative(float field_value) {
 // -------------------------------------------------------------
 // Return the potential V(ϕ) at a given field value (interpolated or analytic)
 // -------------------------------------------------------------
-float potential(float field_value) {
+double potential(double field_value) {
 #if numerical_potential
     int l = 0;
     while (field_numerical[l] >= field_value)
@@ -45,7 +45,7 @@ float potential(float field_value) {
 // -------------------------------------------------------------
 // Return ∂V/∂ϕ at a grid point (interpolated or analytic)
 // -------------------------------------------------------------
-float potential_derivative(int i, int j, int k) {
+double potential_derivative(int i, int j, int k) {
 #if numerical_potential
     int l = lstart[idx(i,j,k)];
     while (field_numerical[l] >= f[idx(i,j,k)])
@@ -65,9 +65,9 @@ float potential_derivative(int i, int j, int k) {
 // -------------------------------------------------------------
 // Compute the total potential energy on the grid
 // -------------------------------------------------------------
-float potential_energy() {
+double potential_energy() {
     DECLARE_INDICES
-    float pot = 0.0;
+    double pot = 0.0;
 
 #if numerical_potential
     int l;
@@ -96,7 +96,7 @@ float potential_energy() {
     }
 #endif
 
-    pot /= gridsize;
+    pot /= static_cast<double>(gridsize);
     return pot;
 }
 
@@ -104,7 +104,7 @@ float potential_energy() {
 // Compute ∂V/∂ϕ divided by V at a grid point
 // Used in δN evolution
 // -------------------------------------------------------------
-float pot_ratio(int i, int j, int k) {
+double pot_ratio(int i, int j, int k) {
 #if numerical_potential
     int l = lstart[idx(i,j,k)];
     while (field_numerical[l] >= f[idx(i,j,k)])
@@ -115,14 +115,14 @@ float pot_ratio(int i, int j, int k) {
         exit(1);
     }
 
-    float pot = (
+    double pot = (
         potential_numerical[l] +
         (f[idx(i,j,k)] - field_numerical[l]) *
         (potential_numerical[l - 1] - potential_numerical[l]) /
         (field_numerical[l - 1] - field_numerical[l])
     );
 
-    float pot_deriv = (
+    double pot_deriv = (
         potential_derivative_numerical[l] +
         (f[idx(i,j,k)] - field_numerical[l]) *
         (potential_derivative_numerical[l - 1] - potential_derivative_numerical[l]) /
@@ -131,8 +131,8 @@ float pot_ratio(int i, int j, int k) {
 
     lstart[idx(i,j,k)] = l - int_errN;
 #else
-    float pot = potential(f[idx(i,j,k)]);
-    float pot_deriv = potential_derivative(i, j, k);
+    double pot = potential(f[idx(i,j,k)]);
+    double pot_deriv = potential_derivative(i, j, k);
 #endif
 
     return pot_deriv / pot;

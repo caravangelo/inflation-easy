@@ -8,10 +8,10 @@
 #include <fstream>
 
 // Field values and derivatives
-std::vector<float> f;
-std::vector<float> fd;
+std::vector<double> f;
+std::vector<double> fd;
 #if perform_deltaN
-std::vector<float> deltaN;
+std::vector<double> deltaN;
 #endif
 
 #if calculate_SIGW
@@ -19,22 +19,23 @@ std::vector<float> hij[6];
 std::vector<float> hijd[6];
 #endif
 
-float fnyquist_p[N][2*N], fdnyquist_p[N][2*N];
+double fnyquist_p[N][2*N], fdnyquist_p[N][2*N];
 #if calculate_SIGW
 float hijnyquist_p[6][N][2*N], hijdnyquist_p[6][N][2*N];
 #endif
-float t, t0;
-float astep = 1., a = 1., ad = 0., ad2 = 0., ad0 = 0., Ne = 0.;
-float phiref = 0; // Reference field value for deltaN calculation
-float hubble_init = 0.;
+
+double t, t0;
+double astep = 1.0, a = 1.0, ad = 0.0, ad2 = 0.0, ad0 = 0.0, Ne = 0.0;
+double phiref = 0.0;       // Reference field value for deltaN calculation
+double hubble_init = 0.0;
 char mode_[10] = "w";
 char ext_[500] = ".dat";
 
 #if numerical_potential
-std::vector<int> lstart;
-std::vector<float> field_numerical;
-std::vector<float> potential_numerical;
-std::vector<float> potential_derivative_numerical;
+std::vector<int>    lstart;
+std::vector<double> field_numerical;
+std::vector<double> potential_numerical;
+std::vector<double> potential_derivative_numerical;
 
 // Load 1D numerical data vectors from file
 void load_numerical_inputs() {
@@ -75,15 +76,15 @@ bool ensure_post_inflation_directory() {
   return true;
 }
 
-// Load a text file of floats into a std::vector
-void load_vector(const std::string& filename, std::vector<float>& vec) {
+// Load a text file of doubles into a std::vector
+void load_vector(const std::string& filename, std::vector<double>& vec) {
   std::ifstream infile(filename);
   if (!infile) {
     std::cerr << "Could not open file: " << filename << std::endl;
     exit(1);
   }
 
-  float value;
+  double value;
   while (infile >> value) {
     vec.push_back(value);
   }
@@ -100,13 +101,13 @@ int main() {
   }
 
   if (!ensure_results_directory()) {
-  return 1;
+    return 1;
   }
-  #if post_inflation
+#if post_inflation
   if (!ensure_post_inflation_directory()) {
     return 1;
   }
-  #endif
+#endif
 
   FILE* output_ = fopen("results/output.txt", "w");
   if (!output_) {

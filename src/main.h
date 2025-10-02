@@ -17,11 +17,11 @@
 
 // -------------------- Math and Constants --------------------
 
-#define float double // Work with double precision
+// #define float double // Work with double precision   <-- REMOVED
 
-const float pi = (float)(2. * asin(1.));
+const double pi = (double)(2. * asin(1.));
 
-inline float pw2(float x) { return x * x; } // Square of a float
+inline double pw2(double x) { return x * x; } // Square of a number
 
 // ----------------- Function to access vector elements -----------------
 
@@ -57,7 +57,7 @@ inline std::pair<int,int> comp_to_indices(int comp) {
 // -------------------- Simulation Parameters --------------------
 
 // Grid spacing (comoving distance between points)
-const float dx = L / (float)N;
+const double dx = L / (double)N;
 
 // Total number of points in the 3D grid
 const int gridsize = N * N * N;
@@ -65,15 +65,15 @@ const int gridsize = N * N * N;
 // -------------------- Global Dynamic Variables --------------------
 
 // Time and scale factor evolution
-extern float t, t0;             // Time and initial time
-extern float astep, a;          // Scale factor and backup (for leapfrog)
-extern float ad, ad2;           // First and second derivatives of scale factor
-extern float aterm;             // Intermediate quantity used in evolution
-extern float Ne;                // e-folding number used in deltaN evolution
-extern float hubble_init;       // Initial Hubble parameter
+extern double t, t0;             // Time and initial time
+extern double astep, a;          // Scale factor and backup (for leapfrog)
+extern double ad, ad2;           // First and second derivatives of scale factor
+extern double aterm;             // Intermediate quantity used in evolution
+extern double Ne;                // e-folding number used in deltaN evolution
+extern double hubble_init;       // Initial Hubble parameter
 
 // Reference field value for deltaN termination
-extern float phiref;
+extern double phiref;
 
 // I/O formatting
 extern char ext_[500];          // Filename extension for outputs
@@ -81,32 +81,33 @@ extern char mode_[];            // File open mode (write/append)
 
 // -------------------- Lattice Fields --------------------
 
-// Main field and its time derivative
-extern std::vector<float> f;
-extern std::vector<float> fd;
+// Main field and its time derivative (double)
+extern std::vector<double> f;
+extern std::vector<double> fd;
 
 #if perform_deltaN
-// deltaN field for separate evolution
-extern std::vector<float> deltaN;
+// deltaN field for separate evolution (double)
+extern std::vector<double> deltaN;
 #endif
 
 #if calculate_SIGW
+// Gravitational waves (float)
 extern std::vector<float> hij[6];
 extern std::vector<float> hijd[6];
 #endif
 
 // Nyquist frequency components for FFT
-extern float fnyquist_p[N][2 * N], fdnyquist_p[N][2 * N];
+extern double fnyquist_p[N][2 * N], fdnyquist_p[N][2 * N];
 #if calculate_SIGW
 extern float hijnyquist_p[6][N][2*N], hijdnyquist_p[6][N][2*N];
 #endif
 
 #if numerical_potential
-// Interpolation for numerical potential
-extern std::vector<int> lstart;                     // Interpolation index grid
-extern std::vector<float> field_numerical;          // Grid of ϕ values
-extern std::vector<float> potential_numerical;      // V(ϕ) values
-extern std::vector<float> potential_derivative_numerical; // dV/dϕ values
+// Interpolation for numerical potential (double)
+extern std::vector<int>    lstart;                     
+extern std::vector<double> field_numerical;            
+extern std::vector<double> potential_numerical;        
+extern std::vector<double> potential_derivative_numerical; 
 #endif
 
 // -------------------- Grid Macros --------------------
@@ -125,35 +126,33 @@ void initialize_simulation();    // Full initialization pipeline
 void initializeN();              // Setup for deltaN calculation
 void initialize_post_inflation();// Post inflation initialization pipeline
 
-
 // Field evolution
-void evolve_fields(float d);     // Evolve f with step d
-void evolve_derivs(float d);     // Evolve fd with step d
-void evolve_scale(float d);      // (Unused but present)
-void evolve_fieldsN(float d);    // Evolve f during deltaN run
-void evolve_derivsN(float d);    // Evolve fd during deltaN run
+void evolve_fields(double d);     // Evolve f with step d
+void evolve_derivs(double d);     // Evolve fd with step d
+void evolve_scale(double d);      // (Unused but present)
+void evolve_fieldsN(double d);    // Evolve deltaN with step d
+void evolve_derivsN(double d);    // Evolve deltaN derivative with step d
 
 // Energies
-float gradient_energy();         // Compute spatial gradient energy
-float kin_energy();              // Compute kinetic energy
-float potential_energy();        // Compute total potential energy on grid
+double gradient_energy();         
+double kin_energy();              
+double potential_energy();        
 
 // Potential interface
-float potential(float field_value);                 // V(ϕ) for single value
-float potential_derivative(int i, int j, int k);    // ∂V/∂ϕ at a grid point
-float pot_ratio(int i, int j, int k);               // ∂V/∂ϕ / V
+double potential(double field_value);                 
+double potential_derivative(int i, int j, int k);     
+double pot_ratio(int i, int j, int k);                
 
 // Output routines
-void output_parameters();               // Write simulation parameters to file
-void save(int force);                   // Save observables (means, spectra, etc.)
-void save_last();                       // Final snapshot
-void saveN();                           // Save for deltaN evolution
-void save_post_inflation(int force);    // Save for post inflation evolution
+void output_parameters();               
+void save(int force);                   
+void save_last();                     
+void saveN();                          
+void save_post_inflation(int force);    
 
 // Utilities
-void fftrn(float f[], float fnyquist[], int ndims, int size[], int forward); // Real FFT
-void load_vector(const std::string& filename, std::vector<float>& vec);      // Read floats from file
-bool ensure_results_directory();                                             // Create output directory if needed
+void load_vector(const std::string& filename, std::vector<double>& vec);      
+bool ensure_results_directory();                                              
 
 // Main evolution loops
 void run_evolution_loop(FILE* output_);
