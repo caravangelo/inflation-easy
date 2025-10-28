@@ -295,9 +295,10 @@ void evolve_fieldsN(double d) {
 #else
     if (potential(f[idx(i,j,k)]) > potential(phiref))
 #endif
+    {
     deltaN[idx(i,j,k)] += d;
-
     f[idx(i,j,k)] += d * fd[idx(i,j,k)];
+    }
   }
 
   a += d * ad;
@@ -363,7 +364,7 @@ void run_deltaN_loop(FILE* output_) {
 }
 #endif
 
-
+#if post_inflation
 // -------------------- Post-inflation Evolution --------------------
 
 // ===== derivative pack (uses existing dfdx, idx, INCREMENT/DECREMENT, N, dx) =====
@@ -421,6 +422,7 @@ inline void build_deriv_pack(int i, int j, int k, DerivPack& P) {
 
   P.f_here = f[idx(i,j,k)];
 }
+
 
 // ===== fast source using your sym_idx and comp_to_indices =====
 inline double stress_energy_post_inflation_fast(int l, int m, const DerivPack& P) {
@@ -581,3 +583,5 @@ void run_post_inflation_loop(FILE* output_) {
   printf("Saving final inflaton data\n");
   evolve_fields(-0.5 * dt * std::pow(astep, rescale_s - 1.0));
 }
+
+#endif

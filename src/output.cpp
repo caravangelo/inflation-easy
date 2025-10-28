@@ -286,7 +286,7 @@ void spectraGW()
     static int first = 1;
 
     const int   numbins   = (int)(std::sqrt(3.0) * (N/2)) + 1;
-    const int   i_max_out = (int)std::floor(0.90 * (N/2));   // keep up to 90% of Nyquist
+    const int   i_max_out = (int)std::floor(0.90 * numbins);   // keep up to 90% of Nyquist
     const float dp        = 2.f * (float)pi / (float)L;
 
     std::vector<int>   numpoints(numbins, 0);
@@ -440,7 +440,7 @@ void spectraGW()
     }
 
     // write (normalization: keep your convention if you had one)
-    const float norm1 = 1.0f; // replace with your previous norm if desired
+    const float norm1 = 0.5f * std::pow(L / rescale_B, 3) / std::pow((float)N, 6); // replace with your previous norm if desired
     for (int i = 0; i < numbins; ++i) {
         if (numpoints[i] > 0) f2[i] /= numpoints[i];
         fprintf(spectraGW_, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
@@ -452,14 +452,14 @@ void spectraGW()
     for (int c = 0; c < 6; ++c) fftrnf(hij[c].data(), (float*)hijnyquist_p[c], 3, arraysize, -1);
 }
 
-// --------------- a^4 P_{Omega_GW}(k) with Λ–contraction ---------------------
-void spectraOmegaGW()
+// --------------- a^4 P_{\dot h}(k) with Λ–contraction ---------------------
+void spectraGWdot()
 {
-    static FILE *spectraOmegaGW_ = nullptr;
+    static FILE *spectraGWdot_ = nullptr;
     static int first = 1;
 
     const int   numbins   = (int)(std::sqrt(3.0) * (N/2)) + 1;
-    const int   i_max_out = (int)std::floor(0.90 * (N/2));   // keep up to 90% of Nyquist
+    const int   i_max_out = (int)std::floor(0.90 * numbins);   // keep up to 90% of Nyquist
     const float dp        = 2.f * (float)pi / (float)L;
 
     std::vector<int>   numpoints(numbins, 0);
@@ -467,8 +467,8 @@ void spectraOmegaGW()
     for (int i = 0; i < numbins; ++i) p[i] = dp * i;
 
     if (first) {
-        snprintf(name_, sizeof(name_), "results/spectraOmegaGW%s", ext_);
-        spectraOmegaGW_ = fopen(name_, mode_);
+        snprintf(name_, sizeof(name_), "results/spectraGWdot%s", ext_);
+        spectraGWdot_ = fopen(name_, mode_);
         first = 0;
     }
 
@@ -608,13 +608,13 @@ void spectraOmegaGW()
         }
     }
 
-    const float norm1 = 1.0f; // replace with your previous norm if desired
+    const float norm1 = 0.5f * std::pow(L / rescale_B, 3) / std::pow((float)N, 6); // replace with your previous norm if desired
     for (int i = 0; i < numbins; ++i) {
         if (numpoints[i] > 0) f2[i] /= numpoints[i];
-        fprintf(spectraOmegaGW_, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
+        fprintf(spectraGWdot_, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
     }
-    fprintf(spectraOmegaGW_, "\n");
-    fflush(spectraOmegaGW_);
+    fprintf(spectraGWdot_, "\n");
+    fflush(spectraGWdot_);
 
     // back to real space (float path)
     for (int c = 0; c < 6; ++c) fftrnf(hijd[c].data(), (float*)hijdnyquist_p[c], 3, arraysize, -1);
@@ -1115,6 +1115,11 @@ void spectraN()
         f2[i] = 0.;
     }
 
+    double Nmean = 0;
+    LOOP Nmean += deltaN[idx(i,j,k)];
+    Nmean = Nmean / gridsize;
+    LOOP deltaN[idx(i,j,k)] -= Nmean;
+
     // Transform deltaN to Fourier space (double FFT)
     fftrnd(deltaN.data(), (double *)fnyquist_p, 3, arraysize, 1);
 
@@ -1529,7 +1534,7 @@ void save(int infrequent)
             spectraf();
         #if calculate_SIGW
             spectraGW();
-            spectraOmegaGW();
+            spectraGWdot();
         #endif
         }
         if (output_histogram)
@@ -1598,6 +1603,7 @@ void saveN()
 // Stub to avoid link errors when perform_deltaN==0
 void saveN() {}
 #endif
+
 
 // Post-Inflation part of the output code
 //
@@ -1864,7 +1870,7 @@ void spectraGW_post_inflation()
     static int first = 1;
 
     const int   numbins = (int)(sqrt(3.0) * (N/2)) + 1;
-    const int i_max_out = (int)floor(0.90 * (N/2));   // keep up to 90% of Nyquist
+    const int i_max_out = (int)floor(0.90 * numbins);   // keep up to 90% of Nyquist
     const float dp      = 2.f * pi / L;
 
     std::vector<int>   numpoints(numbins, 0);
@@ -2017,8 +2023,7 @@ void spectraGW_post_inflation()
         }
     }
 
-    // write (normalization: keep your convention if you had one)
-    const float norm1 = 1.0f; // replace with your previous norm if desired
+    const float norm1 = 0.5f * std::pow(L / rescale_B, 3) / std::pow((float)N, 6); 
     for (int i = 0; i < numbins; ++i) {
         if (numpoints[i] > 0) f2[i] /= numpoints[i];
         fprintf(spectraGW_, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
@@ -2030,14 +2035,14 @@ void spectraGW_post_inflation()
     for (int c = 0; c < 6; ++c) fftrnf(hij[c].data(), (float*)hijnyquist_p[c], 3, arraysize, -1);
 }
 
-// --------------- a^4 P_{Omega_GW}(k) with Λ–contraction ---------------------
-void spectraOmegaGW_post_inflation()
+// --------------- a^4 P_{\dot h}(k) with Λ–contraction ---------------------
+void spectraGWdot_post_inflation()
 {
-    static FILE *spectraOmegaGW_ = nullptr;
+    static FILE *spectraGWdot_ = nullptr;
     static int first = 1;
 
     const int   numbins = (int)(sqrt(3.0) * (N/2)) + 1;
-    const int i_max_out = (int)floor(0.90 * (N/2));   // keep up to 90% of Nyquist
+    const int i_max_out = (int)floor(0.90 * numbins);   // keep up to 90% of Nyquist
     const float dp      = 2.f * pi / L;
 
     std::vector<int>   numpoints(numbins, 0);
@@ -2045,8 +2050,8 @@ void spectraOmegaGW_post_inflation()
     for (int i = 0; i < numbins; ++i) p[i] = dp * i;
 
     if (first) {
-        snprintf(name_, sizeof(name_), "results/post_inflation/spectraOmegaGW%s", ext_);
-        spectraOmegaGW_ = fopen(name_, mode_);
+        snprintf(name_, sizeof(name_), "results/post_inflation/spectraGWdot%s", ext_);
+        spectraGWdot_ = fopen(name_, mode_);
         first = 0;
     }
 
@@ -2185,13 +2190,13 @@ void spectraOmegaGW_post_inflation()
         }
     }
 
-    const float norm1 = 1.0f; // replace with your previous norm if desired
+    const float norm1 = 0.5f * std::pow(L / rescale_B, 3) / std::pow((float)N, 6); 
     for (int i = 0; i < numbins; ++i) {
         if (numpoints[i] > 0) f2[i] /= numpoints[i];
-        fprintf(spectraOmegaGW_, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
+        fprintf(spectraGWdot_, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
     }
-    fprintf(spectraOmegaGW_, "\n");
-    fflush(spectraOmegaGW_);
+    fprintf(spectraGWdot_, "\n");
+    fflush(spectraGWdot_);
 
     for (int c = 0; c < 6; ++c) fftrnf(hijd[c].data(), (float*)hijdnyquist_p[c], 3, arraysize, -1);
 }
@@ -2288,7 +2293,7 @@ void save_post_inflation(int infrequent)
             spectraf_post_inflation();
         #if calculate_SIGW
             spectraGW_post_inflation();
-            spectraOmegaGW_post_inflation();
+            spectraGWdot_post_inflation();
         #endif
         }
         if (output_histogram)

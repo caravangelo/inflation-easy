@@ -15,13 +15,13 @@
 // -------------------- Lattice and Evolution Parameters --------------------
 
 // Number of points along each spatial dimension (total lattice points will be N^3)
-const int N = 256; // Must be a power of 2
+const int N = 128; // Must be a power of 2
 
 // Rescaling exponent (must be 0 unless you've tested otherwise)
 const double rescale_s = 0.0;
 
 // Final scale factor value (simulation stops when a >= af)
-const double af = 2.*N;
+const double af = 2*N;
 
 // Random seed for generating initial vacuum fluctuations
 const int seed = 8;
@@ -38,13 +38,13 @@ const double initial_derivative = -0.06727651095116181; // Initial field velocit
 const double L = 10.0; //10 Comoving box size in code units (must be sub-horizon at start)
 const double dt = 0.001; // Time step
 // Output frequency in time steps (standard and infrequent quantities)
-const int output_freq = 100;
-const int output_infrequent_freq = 100;
+const int output_freq = 500;
+const int output_infrequent_freq = 500;
 
 #if perform_deltaN
 const double dN = 0.0001; // e-fold increment in deltaN evolution
-const double Nend = 2.0;   // Final e-folding time for deltaN run
-// const double phiref_manual = value; // (Optional) manually set the reference ϕ value
+const double Nend = 5.0;   // Final e-folding time for deltaN run
+//const double phiref_manual = 2.680654050913246; // (Optional) manually set the reference ϕ value
 
 // Set monotonic_potential = 1 if the potential increases with |ϕ|
 // Set antimonotonic_potential = 1 if it decreases with |ϕ|
@@ -55,9 +55,10 @@ const double Nend = 2.0;   // Final e-folding time for deltaN run
 #endif
 
 #if post_inflation
+const double horizon_factor = 1.0;
 const double omega = 1.0/3.0;
 const double dt_post_inflation = 0.001;
-const double af_post_inflation = 2.*N;
+const double af_post_inflation = 2.*N*horizon_factor;
 #endif
 
 #else
@@ -121,8 +122,8 @@ const int nbins = 256;
 // -------------------- Numerical Potential Handling --------------------
 
 #if numerical_potential
-const int int_err = 5;   // Increase if the code gives "interpolation error"
-const int int_errN = 1;  // Same, but for deltaN interpolation
+const int int_err = 10;   // Increase if the code gives "interpolation error"
+const int int_errN = 5;  // Same, but for deltaN interpolation
 #endif
 
 /// Set to 1 to enable OpenMP parallelism in selected loops (if supported by the compiler)

@@ -7,6 +7,8 @@ This code is an adaptation of FFTEASY by G. Felder
 #include <cstdio>
 #include <cmath>
 
+//#define float double // only use this if you want to set everything to double
+
 // Simple complex struct parametrized by scalar type T
 template <typename T>
 struct cpx {

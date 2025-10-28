@@ -17,7 +17,7 @@
 
 // -------------------- Math and Constants --------------------
 
-// #define float double // Work with double precision   <-- REMOVED
+//#define float double // Work with double precision 
 
 const double pi = (double)(2. * asin(1.));
 
