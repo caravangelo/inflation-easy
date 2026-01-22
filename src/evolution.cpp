@@ -260,6 +260,7 @@ void run_evolution_loop(FILE* output_) {
   }
 
   printf("Saving final inflaton data\n");
+  save(1);
   evolve_fields(-0.5 * dt * std::pow(astep, rescale_s - 1.0)); // sync field values wih velocities
   save_last();
 }
@@ -581,7 +582,8 @@ void run_post_inflation_loop(FILE* output_) {
   }
 
   printf("Saving final inflaton data\n");
-  evolve_fields(-0.5 * dt * std::pow(astep, rescale_s - 1.0));
+  save_post_inflation(1);
+  evolve_fields(-0.5 * dt * std::pow(astep, rescale_s - 1.0)); 
 }
 
 #endif
