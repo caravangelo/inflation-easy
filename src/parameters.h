@@ -15,7 +15,7 @@
 // -------------------- Lattice and Evolution Parameters --------------------
 
 // Number of points along each spatial dimension (total lattice points will be N^3)
-const int N = 128; // Must be a power of 2
+const int N = 32; // Must be a power of 2
 
 // Rescaling exponent (must be 0 unless you've tested otherwise)
 const double rescale_s = 0.0;
@@ -56,7 +56,7 @@ const double Nend = 5.0;   // Final e-folding time for deltaN run
 
 #if post_inflation
 const double horizon_factor = 1.0;
-const double omega = 1.0/3.0;
+const double omega = 1.0/3.0; //Equation of state parameter. Only tested for radiation.
 const double dt_post_inflation = 0.001;
 const double af_post_inflation = 2.*N*horizon_factor;
 #endif
@@ -122,7 +122,7 @@ const int nbins = 256;
 // -------------------- Numerical Potential Handling --------------------
 
 #if numerical_potential
-const int int_err = 10;   // Increase if the code gives "interpolation error"
+const int int_err = 5;   // Increase if the code gives "interpolation error"
 const int int_errN = 5;  // Same, but for deltaN interpolation
 #endif
 

@@ -34,7 +34,7 @@ inline T lapl(int i, int j, int k, const std::vector<T>& field) {
   }
 }
 
-#if calculate_SIGW
+#if calculate_SIGW || post_inflation
 // Central difference for spatial derivative of a scalar field (double or float)
 template <typename T>
 inline T dfdx(int dim, int i, int j, int k, const std::vector<T>& field) {
@@ -119,80 +119,89 @@ void evolve_derivs(double d) {
     ad += 0.5 * d * ad2;
 
     // Scalar field evolution
+    const double friction = (2.0 + rescale_s) * ad / a;
+    const double potnorm  = std::pow(a, 2.0 - 2.0 * rescale_s);
+
 #if parallel_calculation
 #pragma omp parallel for collapse(3)
 #endif
     LOOP {
-        fd[idx(i,j,k)] += d * (
+        const size_t id = idx(i,j,k);
+
+        fd[id] += d * (
             laplnorm * lapl<double>(i, j, k, f)
-            - (2.0 + rescale_s) * ad * fd[idx(i,j,k)] / a
-            - std::pow(a, 2.0 - 2.0 * rescale_s) * potential_derivative(i, j, k)
+            - friction * fd[id]
+            - potnorm * potential_derivative(i, j, k)
         );
     }
 
 #if calculate_SIGW
     // Gravitational wave tensor evolution (store as float, compute RHS in double)
+    const double srcAmp = 2.0 * std::pow(a, -2.0 * rescale_s);
+
 #if parallel_calculation
 #pragma omp parallel for collapse(3)
 #endif
     for (int i=0; i<N; ++i)
     for (int j=0; j<N; ++j)
     for (int k=0; k<N; ++k) {
-        const int id = idx(i,j,k);
+        const size_t id = idx(i,j,k);
 
         // build gradients once
         GradPack G; build_grad_pack(i,j,k,G);
 
         // explicit six components (double)
-        const double T_xx = stress_energy_fast(0,0,G);
-        const double T_yy = stress_energy_fast(1,1,G);
-        const double T_zz = stress_energy_fast(2,2,G);
-        const double T_xy = stress_energy_fast(0,1,G);
-        const double T_xz = stress_energy_fast(0,2,G);
-        const double T_yz = stress_energy_fast(1,2,G);
+        const double gx = G.g[0];
+        const double gy = G.g[1];
+        const double gz = G.g[2];
 
-        const double srcAmp = 2.0 * std::pow(a, -2.0 * rescale_s);
+        const double T_xx = gx * gx;
+        const double T_yy = gy * gy;
+        const double T_zz = gz * gz;
+        const double T_xy = gx * gy;
+        const double T_xz = gx * gz;
+        const double T_yz = gy * gz;
 
         // compute each RHS entirely in double; cast once on store
         {
           const double lap_h = static_cast<double>(lapl<float>(i,j,k,hij[0]));
           const double rhs = d * ( laplnorm * lap_h
-                                 - (2.0 + rescale_s) * ad * static_cast<double>(hijd[0][id]) / a
+                                 - friction * static_cast<double>(hijd[0][id])
                                  + srcAmp * T_xx );
           hijd[0][id] += static_cast<float>(rhs);
         }
         {
           const double lap_h = static_cast<double>(lapl<float>(i,j,k,hij[1]));
           const double rhs = d * ( laplnorm * lap_h
-                                 - (2.0 + rescale_s) * ad * static_cast<double>(hijd[1][id]) / a
+                                 - friction * static_cast<double>(hijd[1][id])
                                  + srcAmp * T_yy );
           hijd[1][id] += static_cast<float>(rhs);
         }
         {
           const double lap_h = static_cast<double>(lapl<float>(i,j,k,hij[2]));
           const double rhs = d * ( laplnorm * lap_h
-                                 - (2.0 + rescale_s) * ad * static_cast<double>(hijd[2][id]) / a
+                                 - friction * static_cast<double>(hijd[2][id])
                                  + srcAmp * T_zz );
           hijd[2][id] += static_cast<float>(rhs);
         }
         {
           const double lap_h = static_cast<double>(lapl<float>(i,j,k,hij[3]));
           const double rhs = d * ( laplnorm * lap_h
-                                 - (2.0 + rescale_s) * ad * static_cast<double>(hijd[3][id]) / a
+                                 - friction * static_cast<double>(hijd[3][id])
                                  + srcAmp * T_xy );
           hijd[3][id] += static_cast<float>(rhs);
         }
         {
           const double lap_h = static_cast<double>(lapl<float>(i,j,k,hij[4]));
           const double rhs = d * ( laplnorm * lap_h
-                                 - (2.0 + rescale_s) * ad * static_cast<double>(hijd[4][id]) / a
+                                 - friction * static_cast<double>(hijd[4][id])
                                  + srcAmp * T_xz );
           hijd[4][id] += static_cast<float>(rhs);
         }
         {
           const double lap_h = static_cast<double>(lapl<float>(i,j,k,hij[5]));
           const double rhs = d * ( laplnorm * lap_h
-                                 - (2.0 + rescale_s) * ad * static_cast<double>(hijd[5][id]) / a
+                                 - friction * static_cast<double>(hijd[5][id])
                                  + srcAmp * T_yz );
           hijd[5][id] += static_cast<float>(rhs);
         }
@@ -425,7 +434,7 @@ inline void build_deriv_pack(int i, int j, int k, DerivPack& P) {
 }
 
 
-// ===== fast source using your sym_idx and comp_to_indices =====
+// ===== fast source using sym_idx() and comp_to_indices() =====
 inline double stress_energy_post_inflation_fast(int l, int m, const DerivPack& P) {
   const double Htilde = ad / a;             // \tilde{\mathcal H}
   const double invH   = 1.0 / Htilde;
@@ -465,28 +474,51 @@ void evolve_derivs_post_inflation(double d) {
     }
 
 #if calculate_SIGW
+    // Precompute time-dependent factors once per call (hot loop optimization)
+    const double Htilde = ad / a;
+    const double invH   = 1.0 / Htilde;
+    const double coeffU = 4.0 / (3.0 * (1.0 + omega));
+
+    // RHS amplitude (C=2 convention)
+    const double srcAmp = 2.0 * std::pow(a, -2.0 * rescale_s);
+
 #if parallel_calculation
 #pragma omp parallel for collapse(3)
 #endif
 for (int i=0; i<N; ++i)
 for (int j=0; j<N; ++j)
 for (int k=0; k<N; ++k) {
-    const int id = idx(i,j,k);
+    const size_t id = idx(i,j,k);
 
     // build derivatives once per site
     DerivPack P; 
     build_deriv_pack(i,j,k,P);
 
     // bare sources (not TT-projected), explicit pairs
-    const double S_xx = stress_energy_post_inflation_fast(0,0,P);
-    const double S_yy = stress_energy_post_inflation_fast(1,1,P);
-    const double S_zz = stress_energy_post_inflation_fast(2,2,P);
-    const double S_xy = stress_energy_post_inflation_fast(0,1,P);
-    const double S_xz = stress_energy_post_inflation_fast(0,2,P);
-    const double S_yz = stress_energy_post_inflation_fast(1,2,P);
+    const double Phi = P.f_here;
 
-    // RHS amplitude (C=2 convention)
-    const double srcAmp = 2.0 * std::pow(a, -2.0 * rescale_s);
+    const double gx = P.gf[0];
+    const double gy = P.gf[1];
+    const double gz = P.gf[2];
+
+    const double dux = P.gfd[0] * invH + gx;
+    const double duy = P.gfd[1] * invH + gy;
+    const double duz = P.gfd[2] * invH + gz;
+
+    // Hessian packing is [xx, yy, zz, xy, xz, yz]
+    const double Hxx = P.Hf[0];
+    const double Hyy = P.Hf[1];
+    const double Hzz = P.Hf[2];
+    const double Hxy = P.Hf[3];
+    const double Hxz = P.Hf[4];
+    const double Hyz = P.Hf[5];
+
+    const double S_xx = 4.0 * Phi * Hxx + 2.0 * gx * gx - coeffU * (dux * dux);
+    const double S_yy = 4.0 * Phi * Hyy + 2.0 * gy * gy - coeffU * (duy * duy);
+    const double S_zz = 4.0 * Phi * Hzz + 2.0 * gz * gz - coeffU * (duz * duz);
+    const double S_xy = 4.0 * Phi * Hxy + 2.0 * gx * gy - coeffU * (dux * duy);
+    const double S_xz = 4.0 * Phi * Hxz + 2.0 * gx * gz - coeffU * (dux * duz);
+    const double S_yz = 4.0 * Phi * Hyz + 2.0 * gy * gz - coeffU * (duy * duz);
 
     // ---- explicit 6 component updates ----
     {
@@ -556,10 +588,10 @@ void run_post_inflation_loop(FILE* output_) {
   initialize_post_inflation();
 
   int numsteps = 0;
-  evolve_derivs_post_inflation(0.5 * dt_post_inflation);
+  evolve_fields(0.5 * dt_post_inflation);
 
   while (a <= af_post_inflation) {
-    double dt_rescaled = dt_post_inflation; // * std::pow(astep, rescale_s - 1);
+    double dt_rescaled = dt_post_inflation; 
     evolve_derivs_post_inflation(dt_rescaled);
     evolve_fields(dt_rescaled);
 
@@ -578,12 +610,12 @@ void run_post_inflation_loop(FILE* output_) {
     fprintf(output_, "numsteps %i\n\n", numsteps);
     fflush(output_);
 
-    astep = a;
   }
 
   printf("Saving final inflaton data\n");
   save_post_inflation(1);
-  evolve_fields(-0.5 * dt * std::pow(astep, rescale_s - 1.0)); 
+  // Note: save_post_inflation() performs a temporary sync/desync for output.
+  // Leave the integrator state unchanged here. 
 }
 
 #endif

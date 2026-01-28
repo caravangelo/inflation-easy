@@ -279,6 +279,7 @@ void spectraf()
     return;
 }
 
+#if calculate_SIGW
 // ------------------------- P_h(k) with Λ–contraction -------------------------
 void spectraGW()
 {
@@ -286,7 +287,7 @@ void spectraGW()
     static int first = 1;
 
     const int   numbins   = (int)(std::sqrt(3.0) * (N/2)) + 1;
-    const int   i_max_out = (int)std::floor(0.90 * numbins);   // keep up to 90% of Nyquist
+    const int   i_max_out = (int)std::floor(0.80 * numbins);   // keep up to 80% of Nyquist
     const float dp        = 2.f * (float)pi / (float)L;
 
     std::vector<int>   numpoints(numbins, 0);
@@ -324,7 +325,7 @@ void spectraGW()
                 if (bin >= i_max_out) continue;
 
                 // read C_ij = h_ij(k) (complex) from hij (interior)
-                int idx_mode = idx(i, j, 2*k);
+                size_t idx_mode = idx(i, j, 2*k);
                 float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
                 for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
                     int comp = sym_idx(l, m);
@@ -385,7 +386,7 @@ void spectraGW()
 
                 float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
                 if (k == 0) {
-                    int idx_mode = idx(i, j, 0);
+                    size_t idx_mode = idx(i, j, 0);
                     for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
                         int comp = sym_idx(l, m);
                         float re = hij[comp][idx_mode];
@@ -439,8 +440,7 @@ void spectraGW()
         }
     }
 
-    // write (normalization: keep your convention if you had one)
-    const float norm1 = 0.5f * std::pow(L / rescale_B, 3) / std::pow((float)N, 6); // replace with your previous norm if desired
+    const float norm1 = 0.5f * std::pow(L / rescale_B, 3) / std::pow((float)N, 6); 
     for (int i = 0; i < numbins; ++i) {
         if (numpoints[i] > 0) f2[i] /= numpoints[i];
         fprintf(spectraGW_, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
@@ -459,7 +459,7 @@ void spectraGWdot()
     static int first = 1;
 
     const int   numbins   = (int)(std::sqrt(3.0) * (N/2)) + 1;
-    const int   i_max_out = (int)std::floor(0.90 * numbins);   // keep up to 90% of Nyquist
+    const int   i_max_out = (int)std::floor(0.80 * numbins);   // keep up to 80% of Nyquist
     const float dp        = 2.f * (float)pi / (float)L;
 
     std::vector<int>   numpoints(numbins, 0);
@@ -476,7 +476,7 @@ void spectraGWdot()
     int arraysize[] = {N, N, N};
     for (int c = 0; c < 6; ++c) fftrnf(hijd[c].data(), (float*)hijdnyquist_p[c], 3, arraysize, 1);
 
-    // conformal -> physical time derivative factor (your convention)
+    // conformal -> physical time derivative factor 
     const double to_phys = rescale_B * std::pow(a, rescale_s - 1.0);
 
     for (int i = 0; i < N; ++i) {
@@ -496,7 +496,7 @@ void spectraGWdot()
                 int bin = (int)lroundf(std::sqrt((float)(px*px + py*py + pz*pz)));
                 if (bin >= i_max_out) continue;
 
-                int idx_mode = idx(i, j, 2*k);
+                size_t idx_mode = idx(i, j, 2*k);
                 float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
                 for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
                     int comp = sym_idx(l, m);
@@ -554,7 +554,7 @@ void spectraGWdot()
 
                 float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
                 if (k == 0) {
-                    int idx_mode = idx(i, j, 0);
+                    size_t idx_mode = idx(i, j, 0);
                     for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
                         int comp = sym_idx(l, m);
                         float re = (float)( (double)hijd[comp][idx_mode]     * to_phys );
@@ -608,7 +608,7 @@ void spectraGWdot()
         }
     }
 
-    const float norm1 = 0.5f * std::pow(L / rescale_B, 3) / std::pow((float)N, 6); // replace with your previous norm if desired
+    const float norm1 = 0.5f * std::pow(L / rescale_B, 3) / std::pow((float)N, 6); 
     for (int i = 0; i < numbins; ++i) {
         if (numpoints[i] > 0) f2[i] /= numpoints[i];
         fprintf(spectraGWdot_, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
@@ -619,6 +619,8 @@ void spectraGWdot()
     // back to real space (float path)
     for (int c = 0; c < 6; ++c) fftrnf(hijd[c].data(), (float*)hijdnyquist_p[c], 3, arraysize, -1);
 }
+
+#endif
 
 //Outputs the 1D physical momentum, that takes into account the modified dispersion relation (see 2209.13616)
 void get_modes()
@@ -1611,6 +1613,7 @@ void saveN() {}
 //
 //
 
+#if post_inflation
 
 // Computes spatial averages and variances of the field and its derivative
 void meansvars_post_inflation(int flush)
@@ -1863,6 +1866,8 @@ void spectraf_post_inflation()
     return;
 }
 
+#if calculate_SIGW
+
 // ------------------------- P_h(k) with Λ–contraction -------------------------
 void spectraGW_post_inflation()
 {
@@ -1870,7 +1875,7 @@ void spectraGW_post_inflation()
     static int first = 1;
 
     const int   numbins = (int)(sqrt(3.0) * (N/2)) + 1;
-    const int i_max_out = (int)floor(0.90 * numbins);   // keep up to 90% of Nyquist
+    const int i_max_out = (int)floor(0.80 * numbins);   // keep up to 90% of Nyquist
     const float dp      = 2.f * pi / L;
 
     std::vector<int>   numpoints(numbins, 0);
@@ -1908,7 +1913,7 @@ void spectraGW_post_inflation()
                 if (bin >= i_max_out) continue;
 
                 // read C_ij = h_ij(k) (complex) from hij (interior)
-                int idx_mode = idx(i, j, 2*k);
+                size_t idx_mode = idx(i, j, 2*k);
                 float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
                 for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
                     int comp = sym_idx(l, m);
@@ -1969,7 +1974,7 @@ void spectraGW_post_inflation()
 
                 float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
                 if (k == 0) {
-                    int idx_mode = idx(i, j, 0);
+                    size_t idx_mode = idx(i, j, 0);
                     for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
                         int comp = sym_idx(l, m);
                         float re = hij[comp][idx_mode];
@@ -2042,7 +2047,7 @@ void spectraGWdot_post_inflation()
     static int first = 1;
 
     const int   numbins = (int)(sqrt(3.0) * (N/2)) + 1;
-    const int i_max_out = (int)floor(0.90 * numbins);   // keep up to 90% of Nyquist
+    const int i_max_out = (int)floor(0.80 * numbins);   // keep up to 80% of Nyquist
     const float dp      = 2.f * pi / L;
 
     std::vector<int>   numpoints(numbins, 0);
@@ -2059,7 +2064,7 @@ void spectraGWdot_post_inflation()
     int arraysize[] = {N, N, N};
     for (int c = 0; c < 6; ++c) fftrnf(hijd[c].data(), (float*)hijdnyquist_p[c], 3, arraysize, 1);
 
-    // conformal -> physical time derivative factor (your convention)
+    // conformal -> physical time derivative factor 
     const float to_phys = rescale_B * pow(a, rescale_s - 1.f);
 
     for (int i = 0; i < N; ++i) {
@@ -2079,7 +2084,7 @@ void spectraGWdot_post_inflation()
                 int bin = (int)lround(sqrt((float)(px*px + py*py + pz*pz)));
                 if (bin >= i_max_out) continue;
 
-                int idx_mode = idx(i, j, 2*k);
+                size_t idx_mode = idx(i, j, 2*k);
                 float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
                 for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
                     int comp = sym_idx(l, m);
@@ -2136,7 +2141,7 @@ void spectraGWdot_post_inflation()
 
                 float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
                 if (k == 0) {
-                    int idx_mode = idx(i, j, 0);
+                    size_t idx_mode = idx(i, j, 0);
                     for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
                         int comp = sym_idx(l, m);
                         float re = hijd[comp][idx_mode]     * to_phys;
@@ -2200,6 +2205,8 @@ void spectraGWdot_post_inflation()
 
     for (int c = 0; c < 6; ++c) fftrnf(hijd[c].data(), (float*)hijdnyquist_p[c], 3, arraysize, -1);
 }
+
+#endif
 
 void histograms_post_inflation()
 {
@@ -2271,7 +2278,7 @@ void histograms_post_inflation()
 void save_post_inflation(int infrequent)
 {
     if (t > 0.) // Synchronize field values and derivatives
-        evolve_fields(-.5 * dt * pow(astep, rescale_s - 1));
+        evolve_fields(-.5 * dt_post_inflation);
 
     meansvars_post_inflation(infrequent);
     scale_post_inflation(infrequent);
@@ -2279,15 +2286,6 @@ void save_post_inflation(int infrequent)
     // Infrequent calculations
     if (infrequent)
     {
-        //if (output_box3D)
-        //    box();
-        //if (output_box2D)
-        //{
-        //    box2d();
-        //    box2dot();
-        //}
-        //if (output_energy)
-        //    energy();
         if (output_spectra)
         {
             spectraf_post_inflation();
@@ -2301,5 +2299,7 @@ void save_post_inflation(int infrequent)
     }
 
     if (t > 0.) // Desynchronize field values and derivatives
-        evolve_fields(.5 * dt * pow(astep, rescale_s - 1));
+        evolve_fields(.5 * dt_post_inflation);
 }
+
+#endif

@@ -240,6 +240,7 @@ void initializeGW() {
 void initialize_post_inflation() {
 
   t0 = 0.0;
+  t = 0.0;
 
   const size_t gs = static_cast<size_t>(N) * N * N;
   for (int c = 0; c < 6; ++c) {
