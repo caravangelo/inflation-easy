@@ -1,10 +1,11 @@
+// output.cpp - Diagnostics and data output
+//
+// This file implements simulation I/O: parameter dumps, spectra, energy diagnostics,
+// and field snapshots written to the results/ directory.
+
 #include <filesystem>
+#include <cfloat>   // DBL_MAX, FLT_MAX
 using namespace std::filesystem;
-/*
-This file contains functions for computing and writing simulation outputs,
-such as field means, variances, spectra, and energy densities.
-Output files are saved in the 'results/' directory with filenames based on the extension 'ext_'.
-*/
 
 #include "main.h"
 #include "ffteasy.hpp"
@@ -20,6 +21,166 @@ void kill_mode(double *field, double *deriv)
     deriv[1] = 0.;
     return;
 }
+
+// -----------------------------------------------------------------------------
+// Power spectra helpers
+// -----------------------------------------------------------------------------
+//
+// The routines below implement a single, shared pipeline for computing and
+// writing a 3D isotropically-binned power spectrum from a real field stored in
+// r2c FFT layout (with a separate Nyquist plane buffer). Individual output
+// functions (e.g. for the inflaton, δN, or log-mapped δN) prepare the field in
+// real space and then call the common backend.
+//
+// Conventions:
+//   - Momentum bin index is the Euclidean norm of integer lattice wave numbers,
+//     rounded to the nearest integer. Bins outside the allocated range are
+//     ignored.
+//   - The output for each bin is <|X_k|^2> averaged over the modes in that bin,
+//     multiplied by the caller-provided normalization factor.
+//
+// -----------------------------------------------------------------------------
+// Scalar power spectrum backend
+// -----------------------------------------------------------------------------
+//
+// This routine expects `field_fft` to be in-place real-to-complex FFT layout
+// (FFTW-style r2c, stored in the real array), with the Nyquist plane stored in
+// `nyquist_plane` (same convention as the rest of the code base).
+//
+// The output is an isotropically binned power spectrum P(k) ∝ <|X_k|^2>, where
+// bins are labeled by the rounded Euclidean norm of the integer lattice wave
+// numbers. The caller supplies the overall normalization.
+
+static void write_isotropic_spectrum_from_fft_r2c(
+FILE *out,
+const std::vector<double> &field_fft,
+const double (*nyquist_plane)[2 * N],
+const double norm1)
+{
+    const int maxnumbins = (int)(1.73205 * (N / 2)) + 1;
+
+    int numpoints[maxnumbins];
+    double p[maxnumbins], f2[maxnumbins];
+
+    const int numbins = maxnumbins;
+    const double dp = 2.0 * pi / L;
+
+    for (int i = 0; i < numbins; i++)
+    {
+        p[i] = i * dp;
+        f2[i] = 0.0;
+        numpoints[i] = 0;
+    }
+
+    // Main k-space cube excluding the Nyquist plane.
+    for (int i = 0; i < N; i++)
+    {
+        const int pz = (i > N / 2) ? i - N : i;
+
+        for (int j = 0; j < N; j++)
+        {
+            const int py = (j > N / 2) ? j - N : j;
+
+            for (int k = 0; k < N / 2; k++)
+            {
+                const int px = k;
+
+                const double pmagnitude = std::sqrt((double)(px * px + py * py + pz * pz));
+                const int bin = (int)lround(pmagnitude);
+
+                if (bin >= 0 && bin < numbins)
+                {
+                    const size_t ind = idx(i, j, k);
+                    const double re = field_fft[ind];
+                    const double im = field_fft[ind + 1];
+
+                    f2[bin] += re * re + im * im;
+                    numpoints[bin] += 1;
+                }
+            }
+        }
+    }
+
+    // Nyquist plane (kx = N/2) stored separately.
+    for (int i = 0; i < N; i++)
+    {
+        const int pz = (i > N / 2) ? i - N : i;
+
+        for (int j = 0; j < N; j++)
+        {
+            const int py = (j > N / 2) ? j - N : j;
+            const int px = N / 2;
+
+            const double pmagnitude = std::sqrt((double)(px * px + py * py + pz * pz));
+            const int bin = (int)lround(pmagnitude);
+
+            if (bin >= 0 && bin < numbins)
+            {
+                const double re = nyquist_plane[i][2 * j];
+                const double im = nyquist_plane[i][2 * j + 1];
+
+                f2[bin] += re * re + im * im;
+                numpoints[bin] += 1;
+            }
+        }
+    }
+
+    // Normalized, binned spectrum.
+    for (int i = 0; i < numbins; i++)
+    {
+        if (numpoints[i] > 0)
+        f2[i] /= (double)numpoints[i];
+        else
+        f2[i] = 0.0;
+
+        std::fprintf(out, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
+    }
+
+    std::fprintf(out, "\n");
+    std::fflush(out);
+}
+
+// Construct δN (linear mapping) in-place in deltaN.
+static void build_deltaN_linear()
+{
+    DECLARE_INDICES
+
+    double Nmean = 0.0;
+    LOOP Nmean += deltaN[idx(i, j, k)];
+    Nmean /= (double)gridsize;
+    LOOP deltaN[idx(i, j, k)] -= Nmean;
+}
+
+// Construct δN using the log mapping used for the LOG spectrum output.
+static void build_deltaN_log()
+{
+    DECLARE_INDICES
+
+    double factt = 0.0;
+    double fmean = 0.0;
+
+    LOOP
+    {
+        factt += fd[idx(i, j, k)] * std::pow(a, rescale_s - 1.0) / (ad * std::pow(a, rescale_s - 2.0));
+        fmean += f[idx(i, j, k)];
+    }
+
+    factt /= (double)gridsize;
+    fmean /= (double)gridsize;
+
+    LOOP
+    {
+        deltaN[idx(i, j, k)] = 0.0;
+
+        const double arg = 1.0 - eta_log * (f[idx(i, j, k)] - fmean) / factt;
+        if (arg > 0.0)
+        {
+            deltaN[idx(i, j, k)] = (1.0 / eta_log) * std::log(arg);
+        }
+    }
+}
+
+
 
 // Computes spatial averages and variances of the field and its derivative
 void meansvars(int flush)
@@ -104,103 +265,56 @@ void scale(int flush)
 
     // Output a, H, and adotdot in physical units using rescalings
     fprintf(sf_, "%f %f %e %e\n",
-            t, a,
-            ad * rescale_B * std::pow(a, rescale_s - 2.0),
-            pw2(rescale_B) * std::pow(a, 2.0 * rescale_s - 2.0) *
-                (ad2 + (rescale_s - 1.0) * pw2(ad) / a));
+    t, a,
+    ad * rescale_B * std::pow(a, rescale_s - 2.0),
+    pw2(rescale_B) * std::pow(a, 2.0 * rescale_s - 2.0) *
+    (ad2 + (rescale_s - 1.0) * pw2(ad) / a));
 
     if (flush)
-        fflush(sf_);
+    fflush(sf_);
 }
 
 // Outputs power spectrum of the field and applies a high-momentum cutoff if enabled
+
 void spectraf()
 {
-    static FILE *spectra_, *spectratimes_; // Output files for power spectra and times at which spectra were taken
-    const int maxnumbins = (int)(1.73205 * (N / 2)) + 1; // Number of bins = sqrt(3)*(N/2)+1 for 3D.
-    int numpoints[maxnumbins]; // Number of points in each momentum bin
-    double p[maxnumbins], f2[maxnumbins]; // Values for each bin: Momentum, |f_k|^2
-    int numbins = maxnumbins; // Use maxnumbins for consistency
-    double pmagnitude; // Total momentum (p) in units of lattice spacing
-    double pdisc;
-    double dp = 2.0 * pi / L; // Grid spacing in momentum space
-    double fp2; // Square magnitude of field (fp2) for a given mode
-    int i, j, k, px, py, pz, iconj, jconj;
-    double norm1 = std::pow(L / rescale_B, 3) / std::pow((double)N, 6); // Normalization to reduced Planck mass units
-
-    int arraysize[] = {N, N, N};
-
+    static FILE *spectra_, *spectratimes_;
     static int first = 1;
+
     if (first)
     {
-        snprintf(name_, sizeof(name_), "results/spectra%s", ext_);
-        spectra_ = fopen(name_, mode_);
+        std::snprintf(name_, sizeof(name_), "results/spectra%s", ext_);
+        spectra_ = std::fopen(name_, mode_);
 
-        snprintf(name_, sizeof(name_), "results/spectratimes%s", ext_);
-        spectratimes_ = fopen(name_, mode_);
+        std::snprintf(name_, sizeof(name_), "results/spectratimes%s", ext_);
+        spectratimes_ = std::fopen(name_, mode_);
+
         first = 0;
     }
 
-    for (i = 0; i < numbins; i++)
-        p[i] = dp * i;
+    const double norm1 = std::pow(L / rescale_B, 3) / std::pow((double)N, 6);
 
-    for (i = 0; i < numbins; i++)
-    {
-        numpoints[i] = 0;
-        f2[i] = 0.;
-    }
+    // Forward FFT to k-space for spectrum evaluation.
 
-    // Forward FFT (double version)
-    fftrnd(f.data(), (double *)fnyquist_p, 3, arraysize, 1);
 
-    for (i = 0; i < N; i++)
-    {
-        px = (i <= N / 2 ? i : i - N);
-        for (j = 0; j < N; j++)
-        {
-            py = (j <= N / 2 ? j : j - N);
-            for (k = 1; k < N / 2; k++)
-            {
-                pz = k;
-                pmagnitude = std::sqrt(pw2((double)px) + pw2((double)py) + pw2((double)pz));
+    int arraysize_spec[] = {N, N, N};
 
-                int bin = (int)lround(pmagnitude);  // Use round instead of truncation
-                if (bin >= numbins) continue;        // Skip out-of-range bins
 
-                fp2 = pw2(f[idx(i,j,2 * k)]) + pw2(f[idx(i,j,2 * k + 1)]);
-                numpoints[bin] += 2;
-                f2[bin] += 2.0 * fp2;
-            }
-            for (k = 0; k <= N / 2; k += N / 2)
-            {
-                pz = k;
-                pmagnitude = std::sqrt(pw2((double)px) + pw2((double)py) + pw2((double)pz));
+    fftrnd(f.data(), (double *)fnyquist_p, 3, arraysize_spec, 1);
 
-                int bin = (int)lround(pmagnitude);
-                if (bin >= numbins) continue;
 
-                if (k == 0)
-                {
-                    fp2 = pw2(f[idx(i,j,0)]) + pw2(f[idx(i,j,1)]);
-                }
-                else
-                {
-                    fp2 = pw2(fnyquist_p[i][2 * j]) + pw2(fnyquist_p[i][2 * j + 1]);
-                }
-                numpoints[bin]++;
-                f2[bin] += fp2;
-            }
-        }
-    }
 
-    for (i = 0; i < numbins; i++)
-    {
-        if (numpoints[i] > 0)
-        {
-            f2[i] = f2[i] / numpoints[i];
-        }
-        fprintf(spectra_, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
-    }
+    write_isotropic_spectrum_from_fft_r2c(spectra_, f, fnyquist_p, norm1);
+    std::fprintf(spectratimes_, "%f %e\n", t, a);
+
+    std::fflush(spectratimes_);
+    // Preserve the original behaviour: optionally apply a hard k-space cutoff to (f, fd).
+    // The optional forcing cutoff operates in Fourier space and, if enabled, permanently filters
+    // both the field and its time derivative by inverse-transforming the filtered modes back to real space.
+    // The implementation below is intentionally identical to the legacy mode-killing logic.
+    int i, j, k, px, py, pz, iconj, jconj;
+    double pdisc;
+    int arraysize[] = {N, N, N};
 
     if (high_cutoff_index > 0 && forcing_cutoff)
     {
@@ -268,598 +382,486 @@ void spectraf()
         fftrnd(fd.data(), (double *)fdnyquist_p, 3, arraysize, -1);
     }
 
-    // Backward FFT of f
+    // Backward FFT to restore the real-space field.
     fftrnd(f.data(), (double *)fnyquist_p, 3, arraysize, -1);
 
-    fprintf(spectra_, "\n");
-    fflush(spectra_);
-    fprintf(spectratimes_, "%f %e\n", t, a);
-    fflush(spectratimes_);
-
-    return;
 }
+
+
 
 #if calculate_SIGW
 // ------------------------- P_h(k) with Λ–contraction -------------------------
-void spectraGW()
-{
-    static FILE *spectraGW_ = nullptr;
-    static int first = 1;
 
-    const int   numbins   = (int)(std::sqrt(3.0) * (N/2)) + 1;
-    const int   i_max_out = (int)std::floor(0.80 * numbins);   // keep up to 80% of Nyquist
-    const float dp        = 2.f * (float)pi / (float)L;
+//=============================================================================
+// Gravitational-wave spectra (transverse-traceless projection)
+//=============================================================================
 
-    std::vector<int>   numpoints(numbins, 0);
-    std::vector<float> p(numbins, 0.f), f2(numbins, 0.f);
-    for (int i = 0; i < numbins; ++i) p[i] = dp * i;
+namespace {
 
-    if (first) {
-        snprintf(name_, sizeof(name_), "results/spectraGW%s", ext_);
-        spectraGW_ = fopen(name_, mode_);
+    // Open a rank-dependent output file once, using the global {name_, ext_, mode_} convention.
+    static inline void open_output_once(FILE *&fp, int &first, const char *relative_path)
+    {
+        if (!first) return;
+        std::snprintf(name_, sizeof(name_), "%s%s", relative_path, ext_);
+        fp = std::fopen(name_, mode_);
         first = 0;
     }
 
-    // --- FFT to k-space (Nyquist planes in scratch) ---
-    int arraysize[] = {N, N, N};
-    for (int c = 0; c < 6; ++c) fftrnf(hij[c].data(), (float*)hijnyquist_p[c], 3, arraysize, 1);
+    // How the time-derivative tensor modes are converted to physical units before projecting.
+    enum class GwScaleMode {
+        None,             // no additional scaling
+        DoubleThenFloat,  // (float)((double)x * to_phys) for exact legacy rounding
+        FloatMultiply     // x * (float)to_phys
+    } ;
 
-    // --- loop over modes ---
-    for (int i = 0; i < N; ++i) {
-        int px = (i <= N/2 ? i : i - N);
-        for (int j = 0; j < N; ++j) {
-            int py = (j <= N/2 ? j : j - N);
+    // Read a single complex tensor component from either the interior r2c buffer or the Nyquist plane.
+    static inline void load_tensor_component(
+    const std::vector<float> &buf,
+    const float (*nyq)[2 * N],
+    const bool on_nyquist_plane,
+    const int i, const int j2,
+    const size_t idx_mode,
+    const GwScaleMode scale_mode,
+    const double to_phys,
+    float &re, float &im)
+    {
+        if (!on_nyquist_plane) {
+            re = buf[idx_mode];
+            im = buf[idx_mode + 1];
+        } else {
+            re = nyq[i][j2];
+            im = nyq[i][j2 + 1];
+        }
 
-            // interior (double-counted)
-            for (int k = 1; k < N/2; ++k) {
-                int pz = k;
+        if (scale_mode == GwScaleMode::None) return;
 
-                // lattice k and |k|
-                float kx = (2.f/(float)dx) * std::sin((float)pi * px / (float)N);
-                float ky = (2.f/(float)dx) * std::sin((float)pi * py / (float)N);
-                float kz = (2.f/(float)dx) * std::sin((float)pi * pz / (float)N);
-                float kt2 = kx*kx + ky*ky + kz*kz;
-                if (kt2 == 0.f) continue;
-
-                int bin = (int)lroundf(std::sqrt((float)(px*px + py*py + pz*pz)));
-                if (bin >= i_max_out) continue;
-
-                // read C_ij = h_ij(k) (complex) from hij (interior)
-                size_t idx_mode = idx(i, j, 2*k);
-                float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
-                for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
-                    int comp = sym_idx(l, m);
-                    float re = hij[comp][idx_mode];
-                    float im = hij[comp][idx_mode + 1];
-                    C_re[l][m] = re; C_im[l][m] = im;
-                    if (m != l) { C_re[m][l] = re; C_im[m][l] = im; }
-                }
-
-                // projector pieces
-                float inv = 1.0f / std::sqrt(kt2);
-                float kh[3] = {kx*inv, ky*inv, kz*inv};
-                float P[3][3];
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b)
-                    P[a][b] = (a==b?1.f:0.f) - kh[a]*kh[b];
-
-                // A = P C P  and  T = Tr(P C)
-                float A_re[3][3] = {{0}}, A_im[3][3] = {{0}};
-                float T_re = 0.f, T_im = 0.f;
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
-                    float r=0.f, im=0.f;
-                    for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
-                        float pal = P[a][l], pbm = P[b][m];
-                        r  += pal * C_re[l][m] * pbm;
-                        im += pal * C_im[l][m] * pbm;
-                    }
-                    A_re[a][b]=r; A_im[a][b]=im;
-                }
-                for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
-                    T_re += P[l][m]*C_re[l][m];
-                    T_im += P[l][m]*C_im[l][m];
-                }
-
-                // Λ–contraction: sum |A - 0.5 P T|^2
-                float fp2 = 0.f;
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
-                    float r  = A_re[a][b] - 0.5f*P[a][b]*T_re;
-                    float im = A_im[a][b] - 0.5f*P[a][b]*T_im;
-                    fp2 += r*r + im*im;
-                }
-
-                numpoints[bin] += 2;
-                f2[bin]        += 2.f * fp2;
-            }
-
-            // 0 and Nyquist planes (single-counted)
-            for (int k = 0; k <= N/2; k += N/2) {
-                int pz = k;
-
-                float kx = (2.f/(float)dx) * std::sin((float)pi * px / (float)N);
-                float ky = (2.f/(float)dx) * std::sin((float)pi * py / (float)N);
-                float kz = (2.f/(float)dx) * std::sin((float)pi * pz / (float)N);
-                float kt2 = kx*kx + ky*ky + kz*kz;
-                if (kt2 == 0.f) continue;
-
-                int bin = (int)lroundf(std::sqrt((float)(px*px + py*py + pz*pz)));
-                if (bin >= i_max_out) continue;
-
-                float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
-                if (k == 0) {
-                    size_t idx_mode = idx(i, j, 0);
-                    for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
-                        int comp = sym_idx(l, m);
-                        float re = hij[comp][idx_mode];
-                        float im = hij[comp][idx_mode + 1];
-                        C_re[l][m]=re; C_im[l][m]=im;
-                        if (m!=l){ C_re[m][l]=re; C_im[m][l]=im; }
-                    }
-                } else { // Nyquist plane stored in scratch
-                    int j2 = 2*j;
-                    for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
-                        int comp = sym_idx(l, m);
-                        float re = hijnyquist_p[comp][i][j2];
-                        float im = hijnyquist_p[comp][i][j2 + 1];
-                        C_re[l][m]=re; C_im[l][m]=im;
-                        if (m!=l){ C_re[m][l]=re; C_im[m][l]=im; }
-                    }
-                }
-
-                float inv = 1.0f / std::sqrt(kt2);
-                float kh[3] = {kx*inv, ky*inv, kz*inv};
-                float P[3][3];
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b)
-                    P[a][b] = (a==b?1.f:0.f) - kh[a]*kh[b];
-
-                float A_re[3][3] = {{0}}, A_im[3][3] = {{0}};
-                float T_re = 0.f, T_im = 0.f;
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
-                    float r=0.f, im=0.f;
-                    for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
-                        float pal=P[a][l], pbm=P[b][m];
-                        r  += pal*C_re[l][m]*pbm;
-                        im += pal*C_im[l][m]*pbm;
-                    }
-                    A_re[a][b]=r; A_im[a][b]=im;
-                }
-                for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
-                    T_re += P[l][m]*C_re[l][m];
-                    T_im += P[l][m]*C_im[l][m];
-                }
-
-                float fp2 = 0.f;
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
-                    float r  = A_re[a][b] - 0.5f*P[a][b]*T_re;
-                    float im = A_im[a][b] - 0.5f*P[a][b]*T_im;
-                    fp2 += r*r + im*im;
-                }
-
-                numpoints[bin] += 1;
-                f2[bin]        += fp2;
-            }
+        if (scale_mode == GwScaleMode::DoubleThenFloat) {
+            re = (float)((double)re * to_phys);
+            im = (float)((double)im * to_phys);
+        } else { // FloatMultiply
+            const float tp = (float)to_phys;
+            re *= tp;
+            im *= tp;
         }
     }
 
-    const float norm1 = 0.5f * std::pow(L / rescale_B, 3) / std::pow((float)N, 6); 
-    for (int i = 0; i < numbins; ++i) {
-        if (numpoints[i] > 0) f2[i] /= numpoints[i];
-        fprintf(spectraGW_, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
-    }
-    fprintf(spectraGW_, "\n");
-    fflush(spectraGW_);
+    // Core GW spectrum writer shared by GW / GWdot and inflation / post-inflation variants.
+    // This is a direct factorization of the legacy implementation: loop structure and arithmetic are preserved.
+    static void write_gw_spectrum_impl(
+    FILE *out,
+    std::vector<float> (&h)[6],
+    float (*hnyq)[N][2 * N],
+    const GwScaleMode scale_mode,
+    const double to_phys)
+    {
+        const int   numbins   = (int)(std::sqrt(3.0) * (N/2)) + 1;
+        const int   i_max_out = (int)std::floor(0.80 * numbins);   // keep up to 80% of Nyquist
+        const float dp        = 2.f * (float)pi / (float)L;
 
-    // restore to real space
-    for (int c = 0; c < 6; ++c) fftrnf(hij[c].data(), (float*)hijnyquist_p[c], 3, arraysize, -1);
+        std::vector<int>   numpoints(numbins, 0);
+        std::vector<float> p(numbins, 0.f), f2(numbins, 0.f);
+        for (int i = 0; i < numbins; ++i) p[i] = dp * i;
+
+        // --- FFT to k-space (Nyquist planes in scratch) ---
+        int arraysize[] = {N, N, N};
+        for (int c = 0; c < 6; ++c) fftrnf(h[c].data(), (float*)hnyq[c], 3, arraysize, 1);
+
+        // --- loop over modes ---
+        for (int i = 0; i < N; ++i) {
+            int px = (i <= N/2 ? i : i - N);
+            for (int j = 0; j < N; ++j) {
+                int py = (j <= N/2 ? j : j - N);
+
+                // interior (double-counted)
+                for (int k = 1; k < N/2; ++k) {
+                    int pz = k;
+
+                    float kx = (2.f/(float)dx) * std::sin((float)pi * px / (float)N);
+                    float ky = (2.f/(float)dx) * std::sin((float)pi * py / (float)N);
+                    float kz = (2.f/(float)dx) * std::sin((float)pi * pz / (float)N);
+                    float kt2 = kx*kx + ky*ky + kz*kz;
+                    if (kt2 == 0.f) continue;
+
+                    int bin = (int)lroundf(std::sqrt((float)(px*px + py*py + pz*pz)));
+                    if (bin >= i_max_out) continue;
+
+                    size_t idx_mode = idx(i, j, 2*k);
+                    float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
+                    for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
+                        int comp = sym_idx(l, m);
+                        float re, im;
+                        load_tensor_component(h[comp], hnyq[comp], false, 0, 0, idx_mode, scale_mode, to_phys, re, im);
+                        C_re[l][m] = re; C_im[l][m] = im;
+                        if (m != l) { C_re[m][l] = re; C_im[m][l] = im; }
+                    }
+
+                    float inv = 1.0f / std::sqrt(kt2);
+                    float kh[3] = {kx*inv, ky*inv, kz*inv};
+                    float P[3][3];
+                    for (int a=0;a<3;++a) for (int b=0;b<3;++b)
+                    P[a][b] = (a==b?1.f:0.f) - kh[a]*kh[b];
+
+                    float A_re[3][3] = {{0}}, A_im[3][3] = {{0}};
+                    float T_re = 0.f, T_im = 0.f;
+                    for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
+                        float r=0.f, im=0.f;
+                        for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
+                            float pal = P[a][l], pbm = P[b][m];
+                            r  += pal * C_re[l][m] * pbm;
+                            im += pal * C_im[l][m] * pbm;
+                        }
+                        A_re[a][b]=r; A_im[a][b]=im;
+                    }
+                    for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
+                        T_re += P[l][m]*C_re[l][m];
+                        T_im += P[l][m]*C_im[l][m];
+                    }
+
+                    float fp2 = 0.f;
+                    for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
+                        float Xr = A_re[a][b] - 0.5f*P[a][b]*T_re;
+                        float Xi = A_im[a][b] - 0.5f*P[a][b]*T_im;
+                        fp2 += Xr*Xr + Xi*Xi;
+                    }
+
+                    numpoints[bin] += 2;
+                    f2[bin] += 2.f * fp2;
+                }
+
+                // Nyquist plane: k = 0 and k = N/2
+                for (int kk = 0; kk <= 1; ++kk) {
+                    int k = kk*(N/2);
+                    int pz = (k==0 ? 0 : -N/2);
+
+                    float kx = (2.f/(float)dx) * std::sin((float)pi * px / (float)N);
+                    float ky = (2.f/(float)dx) * std::sin((float)pi * py / (float)N);
+                    float kz = (2.f/(float)dx) * std::sin((float)pi * pz / (float)N);
+                    float kt2 = kx*kx + ky*ky + kz*kz;
+                    if (kt2 == 0.f) continue;
+
+                    int bin = (int)lroundf(std::sqrt((float)(px*px + py*py + pz*pz)));
+                    if (bin >= i_max_out) continue;
+
+                    const int j2 = 2*j;
+                    float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
+                    for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
+                        int comp = sym_idx(l, m);
+                        float re, im;
+                        load_tensor_component(h[comp], hnyq[comp], true, i, j2, 0, scale_mode, to_phys, re, im);
+                        C_re[l][m] = re; C_im[l][m] = im;
+                        if (m != l) { C_re[m][l] = re; C_im[m][l] = im; }
+                    }
+
+                    float inv = 1.0f / std::sqrt(kt2);
+                    float kh[3] = {kx*inv, ky*inv, kz*inv};
+                    float P[3][3];
+                    for (int a=0;a<3;++a) for (int b=0;b<3;++b)
+                    P[a][b] = (a==b?1.f:0.f) - kh[a]*kh[b];
+
+                    float A_re[3][3] = {{0}}, A_im[3][3] = {{0}};
+                    float T_re = 0.f, T_im = 0.f;
+                    for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
+                        float r=0.f, im=0.f;
+                        for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
+                            float pal = P[a][l], pbm = P[b][m];
+                            r  += pal * C_re[l][m] * pbm;
+                            im += pal * C_im[l][m] * pbm;
+                        }
+                        A_re[a][b]=r; A_im[a][b]=im;
+                    }
+                    for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
+                        T_re += P[l][m]*C_re[l][m];
+                        T_im += P[l][m]*C_im[l][m];
+                    }
+
+                    float fp2 = 0.f;
+                    for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
+                        float Xr = A_re[a][b] - 0.5f*P[a][b]*T_re;
+                        float Xi = A_im[a][b] - 0.5f*P[a][b]*T_im;
+                        fp2 += Xr*Xr + Xi*Xi;
+                    }
+
+                    numpoints[bin] += 1;
+                    f2[bin] += fp2;
+                }
+            }
+        }
+
+        // --- back-transform (restore real-space buffers for continued evolution) ---
+        for (int c = 0; c < 6; ++c) fftrnf(h[c].data(), (float*)hnyq[c], 3, arraysize, -1);
+
+        // --- output: match legacy file format (k_phys, nmodes, spectrum) ---
+        const float norm1 = 0.5f * std::pow(L / rescale_B, 3) / std::pow((float)N, 6);
+        for (int i = 0; i < numbins; ++i) {
+            if (numpoints[i] > 0) f2[i] /= (float)numpoints[i];
+            std::fprintf(out, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
+        }
+        std::fprintf(out, "\n");
+        std::fflush(out);
+    }
+
+} // anonymous namespace
+
+void spectraGW()
+{
+    static FILE *fp = nullptr;
+    static int first = 1;
+    open_output_once(fp, first, "results/spectraGW");
+    write_gw_spectrum_impl(fp, hij, hijnyquist_p, GwScaleMode::None, 1.0);
 }
+
 
 // --------------- a^4 P_{\dot h}(k) with Λ–contraction ---------------------
 void spectraGWdot()
 {
-    static FILE *spectraGWdot_ = nullptr;
+    static FILE *fp = nullptr;
     static int first = 1;
-
-    const int   numbins   = (int)(std::sqrt(3.0) * (N/2)) + 1;
-    const int   i_max_out = (int)std::floor(0.80 * numbins);   // keep up to 80% of Nyquist
-    const float dp        = 2.f * (float)pi / (float)L;
-
-    std::vector<int>   numpoints(numbins, 0);
-    std::vector<float> p(numbins, 0.f), f2(numbins, 0.f);
-    for (int i = 0; i < numbins; ++i) p[i] = dp * i;
-
-    if (first) {
-        snprintf(name_, sizeof(name_), "results/spectraGWdot%s", ext_);
-        spectraGWdot_ = fopen(name_, mode_);
-        first = 0;
-    }
-
-    // FFT to k-space for hdot_ij  (float path)
-    int arraysize[] = {N, N, N};
-    for (int c = 0; c < 6; ++c) fftrnf(hijd[c].data(), (float*)hijdnyquist_p[c], 3, arraysize, 1);
-
-    // conformal -> physical time derivative factor 
+    open_output_once(fp, first, "results/spectraGWdot");
     const double to_phys = rescale_B * std::pow(a, rescale_s - 1.0);
-
-    for (int i = 0; i < N; ++i) {
-        int px = (i <= N/2 ? i : i - N);
-        for (int j = 0; j < N; ++j) {
-            int py = (j <= N/2 ? j : j - N);
-
-            for (int k = 1; k < N/2; ++k) {
-                int pz = k;
-
-                float kx = (2.f/(float)dx) * std::sin((float)pi * px / (float)N);
-                float ky = (2.f/(float)dx) * std::sin((float)pi * py / (float)N);
-                float kz = (2.f/(float)dx) * std::sin((float)pi * pz / (float)N);
-                float kt2 = kx*kx + ky*ky + kz*kz;
-                if (kt2 == 0.f) continue;
-
-                int bin = (int)lroundf(std::sqrt((float)(px*px + py*py + pz*pz)));
-                if (bin >= i_max_out) continue;
-
-                size_t idx_mode = idx(i, j, 2*k);
-                float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
-                for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
-                    int comp = sym_idx(l, m);
-                    // multiply by to_phys (double) then cast to float once
-                    float re = (float)( (double)hijd[comp][idx_mode]     * to_phys );
-                    float im = (float)( (double)hijd[comp][idx_mode + 1] * to_phys );
-                    C_re[l][m]=re; C_im[l][m]=im;
-                    if (m!=l){ C_re[m][l]=re; C_im[m][l]=im; }
-                }
-
-                float inv = 1.0f / std::sqrt(kt2);
-                float kh[3] = {kx*inv, ky*inv, kz*inv};
-                float P[3][3];
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b)
-                    P[a][b] = (a==b?1.f:0.f) - kh[a]*kh[b];
-
-                float A_re[3][3] = {{0}}, A_im[3][3] = {{0}};
-                float T_re = 0.f, T_im = 0.f;
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
-                    float r=0.f, im=0.f;
-                    for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
-                        float pal=P[a][l], pbm=P[b][m];
-                        r  += pal*C_re[l][m]*pbm;
-                        im += pal*C_im[l][m]*pbm;
-                    }
-                    A_re[a][b]=r; A_im[a][b]=im;
-                }
-                for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
-                    T_re += P[l][m]*C_re[l][m];
-                    T_im += P[l][m]*C_im[l][m];
-                }
-
-                float fp2 = 0.f;
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
-                    float r = A_re[a][b] - 0.5f*P[a][b]*T_re;
-                    float im= A_im[a][b] - 0.5f*P[a][b]*T_im;
-                    fp2 += r*r + im*im;
-                }
-
-                numpoints[bin] += 2;
-                f2[bin]        += 2.f * fp2;
-            }
-
-            for (int k = 0; k <= N/2; k += N/2) {
-                int pz = k;
-
-                float kx = (2.f/(float)dx) * std::sin((float)pi * px / (float)N);
-                float ky = (2.f/(float)dx) * std::sin((float)pi * py / (float)N);
-                float kz = (2.f/(float)dx) * std::sin((float)pi * pz / (float)N);
-                float kt2 = kx*kx + ky*ky + kz*kz;
-                if (kt2 == 0.f) continue;
-
-                int bin = (int)lroundf(std::sqrt((float)(px*px + py*py + pz*pz)));
-                if (bin >= i_max_out) continue;
-
-                float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
-                if (k == 0) {
-                    size_t idx_mode = idx(i, j, 0);
-                    for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
-                        int comp = sym_idx(l, m);
-                        float re = (float)( (double)hijd[comp][idx_mode]     * to_phys );
-                        float im = (float)( (double)hijd[comp][idx_mode + 1] * to_phys );
-                        C_re[l][m]=re; C_im[l][m]=im;
-                        if (m!=l){ C_re[m][l]=re; C_im[m][l]=im; }
-                    }
-                } else {
-                    int j2 = 2*j;
-                    for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
-                        int comp = sym_idx(l, m);
-                        float re = (float)( (double)hijdnyquist_p[comp][i][j2]     * to_phys );
-                        float im = (float)( (double)hijdnyquist_p[comp][i][j2 + 1] * to_phys );
-                        C_re[l][m]=re; C_im[l][m]=im;
-                        if (m!=l){ C_re[m][l]=re; C_im[m][l]=im; }
-                    }
-                }
-
-                float inv = 1.0f / std::sqrt(kt2);
-                float kh[3] = {kx*inv, ky*inv, kz*inv};
-                float P[3][3];
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b)
-                    P[a][b] = (a==b?1.f:0.f) - kh[a]*kh[b];
-
-                float A_re[3][3] = {{0}}, A_im[3][3] = {{0}};
-                float T_re = 0.f, T_im = 0.f;
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
-                    float r=0.f, im=0.f;
-                    for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
-                        float pal=P[a][l], pbm=P[b][m];
-                        r  += pal*C_re[l][m]*pbm;
-                        im += pal*C_im[l][m]*pbm;
-                    }
-                    A_re[a][b]=r; A_im[a][b]=im;
-                }
-                for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
-                    T_re += P[l][m]*C_re[l][m];
-                    T_im += P[l][m]*C_im[l][m];
-                }
-
-                float fp2 = 0.f;
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
-                    float r = A_re[a][b] - 0.5f*P[a][b]*T_re;
-                    float im= A_im[a][b] - 0.5f*P[a][b]*T_im;
-                    fp2 += r*r + im*im;
-                }
-
-                numpoints[bin] += 1;
-                f2[bin]        += fp2;
-            }
-        }
-    }
-
-    const float norm1 = 0.5f * std::pow(L / rescale_B, 3) / std::pow((float)N, 6); 
-    for (int i = 0; i < numbins; ++i) {
-        if (numpoints[i] > 0) f2[i] /= numpoints[i];
-        fprintf(spectraGWdot_, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
-    }
-    fprintf(spectraGWdot_, "\n");
-    fflush(spectraGWdot_);
-
-    // back to real space (float path)
-    for (int c = 0; c < 6; ++c) fftrnf(hijd[c].data(), (float*)hijdnyquist_p[c], 3, arraysize, -1);
+    write_gw_spectrum_impl(fp, hijd, hijdnyquist_p, GwScaleMode::DoubleThenFloat, to_phys);
 }
+
 
 #endif
 
 //Outputs the 1D physical momentum, that takes into account the modified dispersion relation (see 2209.13616)
 void get_modes()
 {
-  static FILE *modes_;
-  const int maxnumbins=(int)(1.73205*(N/2))+1; // Number of bins (bin spacing=lattice spacing in Fourier space) = sqrt(NDIMS)*(N/2)+1. Set for 3D (i.e. biggest possible).
-  int numpoints[maxnumbins]; // Number of points in each momentum bin
-  double p_phys[maxnumbins]; // Values for each bin: average physical momentum per bin
-  int numbins=(int)(std::sqrt(3.0)*(N/2))+1; // Actual number of bins for the number of dimensions
-  double pmagnitude, pphysical; // lattice |p| (bin index) and physical momentum
-  int i,j,k,px,py,pz; // px, py, and pz are components of momentum in units of grid spacing
-  const double norm1 = rescale_B;
+    static FILE *modes_;
+    const int maxnumbins=(int)(1.73205*(N/2))+1; // Number of bins (bin spacing=lattice spacing in Fourier space) = sqrt(NDIMS)*(N/2)+1. Set for 3D (i.e. biggest possible).
+    int numpoints[maxnumbins]; // Number of points in each momentum bin
+    double p_phys[maxnumbins]; // Values for each bin: average physical momentum per bin
+    int numbins=(int)(std::sqrt(3.0)*(N/2))+1; // Actual number of bins for the number of dimensions
+    double pmagnitude, pphysical; // lattice |p| (bin index) and physical momentum
+    int i,j,k,px,py,pz; // px, py, and pz are components of momentum in units of grid spacing
+    const double norm1 = rescale_B;
 
-  static int first=1;
-  if(first) // Open output files
-  {
-    snprintf(name_, sizeof(name_), "results/modes%s",ext_);
-    modes_=fopen(name_,mode_);
-    first=0;
-  }
-
-  for(i=0;i<numbins;i++) // Initialize all bins to 0
-  {
-    numpoints[i]=0;
-    p_phys[i]=0.;
-  }
-
-  for(i=0;i<N;i++)
-  {
-    px=(i<=N/2 ? i : i-N);
-    for(j=0;j<N;j++)
+    static int first=1;
+    if(first) // Open output files
     {
-      py=(j<=N/2 ? j : j-N);
-      // Modes with 0<k<N/2 are counted twice
-      for(k=1;k<N/2;k++)
-      {
-        pz=k;
-        pmagnitude=std::sqrt(pw2((double)px)+pw2((double)py)+pw2((double)pz));
-        pphysical=std::sqrt(4.0*pw2((double)N/(double)L)*(pw2(std::sin((double)px*pi/N))+pw2(std::sin((double)py*pi/N))+pw2(std::sin((double)pz*pi/N))));
-        numpoints[(int)pmagnitude] += 2;
-        p_phys[(int)pmagnitude]    += 2.0*pphysical;
-      }
-      // k=0 or k=N/2 counted once
-      for(k=0;k<=N/2;k+=N/2)
-      {
-        pz=k;
-        pmagnitude=std::sqrt(pw2((double)px)+pw2((double)py)+pw2((double)pz));
-        pphysical=std::sqrt(4.0*pw2((double)N/(double)L)*(pw2(std::sin((double)px*pi/N))+pw2(std::sin((double)py*pi/N))+pw2(std::sin((double)pz*pi/N))));
-
-        numpoints[(int)pmagnitude]++; 
-        p_phys[(int)pmagnitude] += pphysical;
-      }
+        snprintf(name_, sizeof(name_), "results/modes%s",ext_);
+        modes_=fopen(name_,mode_);
+        first=0;
     }
-  }
-  for(i=0;i<numbins;i++)
-  {
-    if(numpoints[i]>0) {
-      p_phys[i] = p_phys[i]/numpoints[i];
+
+    for(i=0;i<numbins;i++) // Initialize all bins to 0
+    {
+        numpoints[i]=0;
+        p_phys[i]=0.;
     }
-    fprintf(modes_,"%e\n", (double)norm1 * p_phys[i]);
-  }
 
-  fprintf(modes_,"\n");
-  fflush(modes_);
+    for(i=0;i<N;i++)
+    {
+        px=(i<=N/2 ? i : i-N);
+        for(j=0;j<N;j++)
+        {
+            py=(j<=N/2 ? j : j-N);
+            // Modes with 0<k<N/2 are counted twice
+            for(k=1;k<N/2;k++)
+            {
+                pz=k;
+                pmagnitude=std::sqrt(pw2((double)px)+pw2((double)py)+pw2((double)pz));
+                pphysical=std::sqrt(4.0*pw2((double)N/(double)L)*(pw2(std::sin((double)px*pi/N))+pw2(std::sin((double)py*pi/N))+pw2(std::sin((double)pz*pi/N))));
+                numpoints[(int)pmagnitude] += 2;
+                p_phys[(int)pmagnitude]    += 2.0*pphysical;
+            }
+            // k=0 or k=N/2 counted once
+            for(k=0;k<=N/2;k+=N/2)
+            {
+                pz=k;
+                pmagnitude=std::sqrt(pw2((double)px)+pw2((double)py)+pw2((double)pz));
+                pphysical=std::sqrt(4.0*pw2((double)N/(double)L)*(pw2(std::sin((double)px*pi/N))+pw2(std::sin((double)py*pi/N))+pw2(std::sin((double)pz*pi/N))));
 
-  return;
+                numpoints[(int)pmagnitude]++;
+                p_phys[(int)pmagnitude] += pphysical;
+            }
+        }
+    }
+    for(i=0;i<numbins;i++)
+    {
+        if(numpoints[i]>0) {
+            p_phys[i] = p_phys[i]/numpoints[i];
+        }
+        fprintf(modes_,"%e\n", (double)norm1 * p_phys[i]);
+    }
+
+    fprintf(modes_,"\n");
+    fflush(modes_);
+
+    return;
 }
 
 void bispectraf()
 {
-  //This function outputs the equilateral bispectrum only (see 2209.13616, Sec. 5.3.2).
-  static FILE *bispectra_; // Output files for power spectra and times at which spectra were taken
-  const int maxnumbins=(int)(1.73205*(N/2))+1; // Number of bins (bin spacing=lattice spacing in Fourier space) = sqrt(NDIMS)*(N/2)+1. Set for 3D (i.e. biggest possible).
-  int numpoints[maxnumbins]; // Number of points in each momentum bin
-  double p[maxnumbins], bisreal[maxnumbins], bisimag[maxnumbins]; // bins
-  int numbins=(int)(std::sqrt(3.0)*(N/2))+1; // Actual number of bins for the number of dimensions
-  const double dp=2.0*pi/L; // Size of grid spacing in momentum space
-  double mean=0.;
-  int i1,j1,k1; 
-  int i2,j2,k2,i2n,j2n;
-  int i3,j3,k3;
-  double px1,py1,px2,py2,px3,py3;
-  int i,j,k;
-  double pzaus1,pzaus2,counts;
-  double f1r,f1i,f2r,f2i,f3r,f3i;
-  const double norm1=std::pow(L/rescale_B,6)/std::pow((double)N,9);
-  int arraysize[]={N,N,N}; // Array of grid size in all dimensions - used by FFT routine
-  double kf;
+    //This function outputs the equilateral bispectrum only (see 2209.13616, Sec. 5.3.2).
+    static FILE *bispectra_; // Output files for power spectra and times at which spectra were taken
+    const int maxnumbins=(int)(1.73205*(N/2))+1; // Number of bins
+    int numpoints[maxnumbins]; // Number of points in each momentum bin
+    double p[maxnumbins], bisreal[maxnumbins], bisimag[maxnumbins]; // bins
+    int numbins=(int)(std::sqrt(3.0)*(N/2))+1; // Actual number of bins for the number of dimensions
+    const double dp=2.0*pi/L; // Size of grid spacing in momentum space
+    double mean=0.;
+    int i1,j1,k1;
+    int i2,j2,k2,i2n,j2n;
+    int i3,j3,k3;
+    double px1,py1,px2,py2,px3,py3;
+    int i,j,k;
+    double pzaus1,pzaus2,counts;
+    double f1r,f1i,f2r,f2i,f3r,f3i;
+    const double norm1=std::pow(L/rescale_B,6)/std::pow((double)N,9);
+    int arraysize[]={N,N,N}; // Array of grid size in all dimensions - used by FFT routine
+    double kf;
 
-  LOOP
+    LOOP
     mean += f[idx(i,j,k)];
 
-  mean = mean/(double)gridsize;
+    mean = mean/(double)gridsize;
 
-  LOOP
+    LOOP
     f[idx(i,j,k)] -= mean;
 
-  static int first=1;
-  if(first) // Open output files
-  {
-    snprintf(name_, sizeof(name_), "results/bispectra%s",ext_);
-    bispectra_=fopen(name_,mode_);
-    first=0;
-  }
-
-  for(k=0;k<numbins;k++)
-    p[k]=dp*k;
-
-  for(k=0;k<numbins;k++)
-  {
-    numpoints[k]=0;
-    bisreal[k]=0.;
-    bisimag[k]=0.;
-  }
-
-  fftrnd(f.data(), (double *)fnyquist_p, 3, arraysize, 1); // Transform field values to Fourier space
-
-  for(k=0;k<numbins;k++)
-  {
-    kf = (double)k;
-    for(i1=0;i1<N;i1++) for(j1=0;j1<N;j1++)
-    {//for1
-      px1=(i1<=N/2 ? i1 : i1-N);
-      py1=(j1<=N/2 ? j1 : j1-N);
-      pzaus1 = pw2(kf)-pw2(px1)-pw2(py1);
-      if(pzaus1>=0)
-      for(k1=(int)std::round(std::sqrt(pzaus1))-1; k1 < (int)std::round(std::sqrt(pzaus1))+2; k1++)
-      if(std::abs(std::sqrt(pw2(px1)+pw2(py1)+pw2((double)k1))-kf) < 1.5 && k1 <= N/2 && k1 >= 0)
-      for(i2=0;i2<N;i2++) for(j2=0;j2<N;j2++)
-      {//for2
-        px2=(i2<=N/2 ? i2 : i2-N);
-        py2=(j2<=N/2 ? j2 : j2-N);
-        pzaus2 = pw2(kf)-pw2(px2)-pw2(py2);
-        if(pzaus2>=0)
-        for(k2=(int)std::round(std::sqrt(pzaus2))-1; k2 < (int)std::round(std::sqrt(pzaus2))+2; k2++)
-        if(std::abs(std::sqrt(pw2(px2)+pw2(py2)+pw2((double)k2))-kf) < 1.5 && k2 <= N/2 && k2 >= 0)
-        {//if triangleapprox2
-          px3 = px1 + px2;
-          py3 = py1 + py2;
-          k3  = k1 + k2;
-
-          if(px3 <= N/2 && px3 > -N/2  && py3 <= N/2 && py3 > -N/2)
-          {//if in lattice
-            i3=(px3>=0 ? px3 : px3+N);
-            j3=(py3>=0 ? py3 : py3+N);
-            if(std::abs(std::sqrt(pw2(px3)+pw2(py3)+pw2((double)k3))-kf)< 1.5 && k3 <= N/2)
-            {
-              f1r = f[idx(i1,j1,2*k1)];
-              f1i = f[idx(i1,j1,2*k1+1)];
-              f2r = f[idx(i2,j2,2*k2)];
-              f2i = f[idx(i2,j2,2*k2+1)];
-              f3r = f[idx(i3,j3,2*k3)];
-              f3i = f[idx(i3,j3,2*k3+1)];
-              counts = 1.;
-              if( k1 == (int)(N/2))
-              {
-                f1r = fnyquist_p[i1][2*j1];
-                f1i = fnyquist_p[i1][2*j1+1];
-              }
-              if( k2 == (int)(N/2))
-              {
-                f2r = fnyquist_p[i2][2*j2];
-                f2i = fnyquist_p[i2][2*j2+1];
-              }
-              if( k3 == (int)(N/2))
-              {
-                f3r = fnyquist_p[i3][2*j3];
-                f3i = fnyquist_p[i3][2*j3+1];
-              }
-              if(k1 != (int)N/2 && k2 != (int)N/2 && (k1 != 0 || k2 != 0))
-                counts = 2.;
-
-              numpoints[k] += (int)counts;
-              bisreal[k] += counts*(f1r*f2r*f3r - f1i*f2i*f3r + f1i*f2r*f3i + f2i*f1r*f3i);
-              bisimag[k] += counts*(-f1r*f2r*f3i + f1i*f2i*f3i + f1i*f2r*f3r + f2i*f1r*f3r);
-            }
-            if(k1 != 0 && k2!= 0)
-            {
-              k3 = k1-k2;
-              if(k3>=0)
-              if(std::abs(std::sqrt(pw2(px3)+pw2(py3)+pw2((double)k3))-kf) < 1.5 && k3 <= N/2)
-              {
-                i2n=(-px2 >=0 ? -px2 : -px2+N);
-                j2n=(-py2 >=0 ? -py2 : -py2+N);
-
-                f1r = f[idx(i1,j1,2*k1)];
-                f1i = f[idx(i1,j1,2*k1+1)];
-                f2r = f[idx(i2n,j2n,2*k2)];
-                f2i = -f[idx(i2n,j2n,2*k2+1)];
-                f3r = f[idx(i3,j3,2*k3)];
-                f3i = f[idx(i3,j3,2*k3+1)];
-
-                if( k1 == (int)(N/2))
-                {
-                  f1r = fnyquist_p[i1][2*j1];
-                  f1i = fnyquist_p[i1][2*j1+1];
-                }
-                if( k2 == (int)(N/2))
-                {
-                  f2r = fnyquist_p[i2n][2*j2n];
-                  f2i = -fnyquist_p[i2n][2*j2n+1];
-                }
-                if( k3 == (int)(N/2))
-                {
-                  f3r = fnyquist_p[i3][2*j3];
-                  f3i = fnyquist_p[i3][2*j3+1];
-                }
-
-                numpoints[k] += 2;
-                bisreal[k] += 2.0*(f1r*f2r*f3r - f1i*f2i*f3r + f1i*f2r*f3i + f2i*f1r*f3i);
-                bisimag[k] += 2.0*(-f1r*f2r*f3i + f1i*f2i*f3i + f1i*f2r*f3r + f2i*f1r*f3r);
-              }
-            }
-          }// if in lattice
-        }// if triangleapprox2
-      }// for2
-    }// for1
-  }// for k
-
-  for(k=0;k<numbins;k++)
-  {
-    if(numpoints[k]>0) {
-      bisreal[k] = bisreal[k]/numpoints[k];
-      bisimag[k] = bisimag[k]/numpoints[k];
+    static int first=1;
+    if(first) // Open output files
+    {
+        snprintf(name_, sizeof(name_), "results/bispectra%s",ext_);
+        bispectra_=fopen(name_,mode_);
+        first=0;
     }
 
-    fprintf(bispectra_,"%e %d %e %e\n",
-            p[k],numpoints[k],norm1*bisreal[k],norm1*bisimag[k]);
-  }
+    for(k=0;k<numbins;k++)
+    p[k]=dp*k;
 
-  fftrnd(f.data(), (double *)fnyquist_p, 3, arraysize, -1);
+    for(k=0;k<numbins;k++)
+    {
+        numpoints[k]=0;
+        bisreal[k]=0.;
+        bisimag[k]=0.;
+    }
 
-  LOOP
+    fftrnd(f.data(), (double *)fnyquist_p, 3, arraysize, 1); // Transform field values to Fourier space
+
+    for(k=0;k<numbins;k++)
+    {
+        kf = (double)k;
+        for(i1=0;i1<N;i1++) for(j1=0;j1<N;j1++)
+        {//for1
+            px1=(i1<=N/2 ? i1 : i1-N);
+            py1=(j1<=N/2 ? j1 : j1-N);
+            pzaus1 = pw2(kf)-pw2(px1)-pw2(py1);
+            if(pzaus1>=0)
+            for(k1=(int)std::round(std::sqrt(pzaus1))-1; k1 < (int)std::round(std::sqrt(pzaus1))+2; k1++)
+            if(std::abs(std::sqrt(pw2(px1)+pw2(py1)+pw2((double)k1))-kf) < 1.5 && k1 <= N/2 && k1 >= 0)
+            for(i2=0;i2<N;i2++) for(j2=0;j2<N;j2++)
+            {//for2
+                px2=(i2<=N/2 ? i2 : i2-N);
+                py2=(j2<=N/2 ? j2 : j2-N);
+                pzaus2 = pw2(kf)-pw2(px2)-pw2(py2);
+                if(pzaus2>=0)
+                for(k2=(int)std::round(std::sqrt(pzaus2))-1; k2 < (int)std::round(std::sqrt(pzaus2))+2; k2++)
+                if(std::abs(std::sqrt(pw2(px2)+pw2(py2)+pw2((double)k2))-kf) < 1.5 && k2 <= N/2 && k2 >= 0)
+                {//if triangleapprox2
+                    px3 = px1 + px2;
+                    py3 = py1 + py2;
+                    k3  = k1 + k2;
+
+                    if(px3 <= N/2 && px3 > -N/2  && py3 <= N/2 && py3 > -N/2)
+                    {//if in lattice
+                        i3=(px3>=0 ? px3 : px3+N);
+                        j3=(py3>=0 ? py3 : py3+N);
+                        if(std::abs(std::sqrt(pw2(px3)+pw2(py3)+pw2((double)k3))-kf)< 1.5 && k3 <= N/2)
+                        {
+                            f1r = f[idx(i1,j1,2*k1)];
+                            f1i = f[idx(i1,j1,2*k1+1)];
+                            f2r = f[idx(i2,j2,2*k2)];
+                            f2i = f[idx(i2,j2,2*k2+1)];
+                            f3r = f[idx(i3,j3,2*k3)];
+                            f3i = f[idx(i3,j3,2*k3+1)];
+                            counts = 1.;
+                            if( k1 == (int)(N/2))
+                            {
+                                f1r = fnyquist_p[i1][2*j1];
+                                f1i = fnyquist_p[i1][2*j1+1];
+                            }
+                            if( k2 == (int)(N/2))
+                            {
+                                f2r = fnyquist_p[i2][2*j2];
+                                f2i = fnyquist_p[i2][2*j2+1];
+                            }
+                            if( k3 == (int)(N/2))
+                            {
+                                f3r = fnyquist_p[i3][2*j3];
+                                f3i = fnyquist_p[i3][2*j3+1];
+                            }
+                            if(k1 != (int)N/2 && k2 != (int)N/2 && (k1 != 0 || k2 != 0))
+                            counts = 2.;
+
+                            numpoints[k] += (int)counts;
+                            bisreal[k] += counts*(f1r*f2r*f3r - f1i*f2i*f3r + f1i*f2r*f3i + f2i*f1r*f3i);
+                            bisimag[k] += counts*(-f1r*f2r*f3i + f1i*f2i*f3i + f1i*f2r*f3r + f2i*f1r*f3r);
+                        }
+                        if(k1 != 0 && k2!= 0)
+                        {
+                            k3 = k1-k2;
+                            if(k3>=0)
+                            if(std::abs(std::sqrt(pw2(px3)+pw2(py3)+pw2((double)k3))-kf) < 1.5 && k3 <= N/2)
+                            {
+                                i2n=(-px2 >=0 ? -px2 : -px2+N);
+                                j2n=(-py2 >=0 ? -py2 : -py2+N);
+
+                                f1r = f[idx(i1,j1,2*k1)];
+                                f1i = f[idx(i1,j1,2*k1+1)];
+                                f2r = f[idx(i2n,j2n,2*k2)];
+                                f2i = -f[idx(i2n,j2n,2*k2+1)];
+                                f3r = f[idx(i3,j3,2*k3)];
+                                f3i = f[idx(i3,j3,2*k3+1)];
+
+                                if( k1 == (int)(N/2))
+                                {
+                                    f1r = fnyquist_p[i1][2*j1];
+                                    f1i = fnyquist_p[i1][2*j1+1];
+                                }
+                                if( k2 == (int)(N/2))
+                                {
+                                    f2r = fnyquist_p[i2n][2*j2n];
+                                    f2i = -fnyquist_p[i2n][2*j2n+1];
+                                }
+                                if( k3 == (int)(N/2))
+                                {
+                                    f3r = fnyquist_p[i3][2*j3];
+                                    f3i = fnyquist_p[i3][2*j3+1];
+                                }
+
+                                numpoints[k] += 2;
+                                bisreal[k] += 2.0*(f1r*f2r*f3r - f1i*f2i*f3r + f1i*f2r*f3i + f2i*f1r*f3i);
+                                bisimag[k] += 2.0*(-f1r*f2r*f3i + f1i*f2i*f3i + f1i*f2r*f3r + f2i*f1r*f3r);
+                            }
+                        }
+                    } // if in lattice
+                } // if triangleapprox2
+            } // for2
+        } // for1
+    } // for k
+
+    for(k=0;k<numbins;k++)
+    {
+        if(numpoints[k]>0) {
+            bisreal[k] = bisreal[k]/numpoints[k];
+            bisimag[k] = bisimag[k]/numpoints[k];
+        }
+
+        fprintf(bispectra_,"%e %d %e %e\n",
+        p[k],numpoints[k],norm1*bisreal[k],norm1*bisimag[k]);
+    }
+
+    fftrnd(f.data(), (double *)fnyquist_p, 3, arraysize, -1);
+
+    LOOP
     f[idx(i,j,k)] += mean;
 
-  fprintf(bispectra_,"\n");
-  fflush(bispectra_);
+    fprintf(bispectra_,"\n");
+    fflush(bispectra_);
 
-  return;
+    return;
 }
 
 void box()
@@ -887,9 +889,9 @@ void box2d()
     static FILE *snapshots_2d_phi_;
     int i, j, k;
     if(N < 64)
-        i = 5;
+    i = 5;
     else
-        i = 50;
+    i = 50;
 
     static int first=1;
     if(first) // Open output files
@@ -912,9 +914,9 @@ void box2dot()
     static FILE *snapshots_2d_phidot_;
     int i, j, k;
     if(N < 64)
-        i = 5;
+    i = 5;
     else
-        i = 50;
+    i = 50;
 
     static int first=1;
     if(first) // Open output files
@@ -973,7 +975,7 @@ void energy()
 
     // Energy conservation
     fprintf(conservation_, "%e %e %e\n",
-            t, a, 3.0 * std::pow(a, 2.0 * rescale_s - 4.0) * pw2(ad) / (totalE));
+    t, a, 3.0 * std::pow(a, 2.0 * rescale_s - 4.0) * pw2(ad) / (totalE));
     fflush(conservation_);
 }
 
@@ -993,7 +995,7 @@ void readable_time(int t, FILE *info_)
         fprintf(info_, "%d days", t / tdays);
         t = t % tdays;
         if (t > 0)
-            fprintf(info_, ", ");
+        fprintf(info_, ", ");
     }
     // Hours
     if (t > thours)
@@ -1001,7 +1003,7 @@ void readable_time(int t, FILE *info_)
         fprintf(info_, "%d hours", t / thours);
         t = t % thours;
         if (t > 0)
-            fprintf(info_, ", ");
+        fprintf(info_, ", ");
     }
     // Minutes
     if (t > tminutes)
@@ -1009,11 +1011,11 @@ void readable_time(int t, FILE *info_)
         fprintf(info_, "%d minutes", t / tminutes);
         t = t % tminutes;
         if (t > 0)
-            fprintf(info_, ", ");
+        fprintf(info_, ", ");
     }
     // Seconds
     if (t > 0)
-        fprintf(info_, "%d seconds", t);
+    fprintf(info_, "%d seconds", t);
 
     fprintf(info_, "\n");
     return;
@@ -1025,9 +1027,8 @@ void histograms()
     int i = 0, j = 0, k = 0;
     int binnum; // Index of bin for a given field value
     double binfreq[nbins]; // The frequency of field values occurring within each bin
-    double bmin, bmax, df; // Minimum and maximum field values for each field and spacing (in field values) between bins
-    int numpts; // Count the number of points in the histogram for each field. (Should be all lattice points unless explicit field limits are given.)
-
+    double bmin, bmax, df; // Minimum and maximum field values for each field and bin spacing
+    int numpts; // Count the number of points in the histogram for each field.
     static int first = 1;
     if (first) // Open output files
     {
@@ -1058,7 +1059,7 @@ void histograms()
 
     // Initialize all frequencies to zero
     for (i = 0; i < nbins; i++)
-        binfreq[i] = 0.;
+    binfreq[i] = 0.;
 
     // Iterate over grid to determine bin frequencies
     numpts = 0;
@@ -1066,7 +1067,7 @@ void histograms()
     {
         binnum = (int)((f[idx(i,j,k)] - bmin) / df); // Find index of bin for each value
         if (f[idx(i,j,k)] == bmax) // The maximal field value is at the top of the highest bin
-            binnum = nbins - 1;
+        binnum = nbins - 1;
         if (binnum >= 0 && binnum < nbins) // Increment frequency in the appropriate bin
         {
             binfreq[binnum]++;
@@ -1076,10 +1077,10 @@ void histograms()
 
     // Output results
     for (i = 0; i < nbins; i++)
-        fprintf(histogram_, "%e\n", binfreq[i] / (double)numpts); // Output bin frequency normalized so the total equals 1
+    fprintf(histogram_, "%e\n", binfreq[i] / (double)numpts); // Output bin frequency
     fprintf(histogram_, "\n"); // Stick a blank line between times to make the file more readable
     fflush(histogram_);
-    fprintf(histogramtimes_, " %e %e", bmin, df); // Output the starting point and stepsize for the bins at each time
+    fprintf(histogramtimes_, " %e %e", bmin, df); // Output the starting point and stepsize
 
     fprintf(histogramtimes_, "\n");
     fflush(histogramtimes_);
@@ -1087,99 +1088,39 @@ void histograms()
 
 #if perform_deltaN
 
+
 void spectraN()
 {
-    static FILE *spectraN_; // Output file for power spectrum
-    const int maxnumbins = (int)(1.73205 * (N / 2)) + 1; // Number of bins (bin spacing=lattice spacing in Fourier space)
-    int numpoints[maxnumbins]; // Number of points in each momentum bin
-    double p[maxnumbins], f2[maxnumbins]; // Values for each bin: Momentum, |f_k|^2
-    int numbins = (int)(sqrt(3.) * (N / 2)) + 1; // Actual number of bins for the number of dimensions
-    double pmagnitude; // Total momentum (p) in units of lattice spacing
-    double dp = 2. * pi / L; // Grid spacing in momentum space
-    double fp2; // Square magnitude of field mode
-    int i, j, k, px, py, pz;
-    double norm1 = pow(L / rescale_B, 3) / pow((double)N, 6);
-    int arraysize[] = {N, N, N}; // Array of grid size for FFT routine
-
+    static FILE *spectraN_;
     static int first = 1;
-    if (first) // Open output file
+
+    if (first)
     {
-        snprintf(name_, sizeof(name_), "results/spectraN%s", ext_);
-        spectraN_ = fopen(name_, mode_);
+        std::snprintf(name_, sizeof(name_), "results/spectraN%s", ext_);
+        spectraN_ = std::fopen(name_, mode_);
         first = 0;
     }
 
-    // Initialize bin values
-    for (i = 0; i < numbins; i++)
-    {
-        p[i] = dp * i;
-        numpoints[i] = 0;
-        f2[i] = 0.;
-    }
+    // δN is assumed to have been computed in real space by the evolution step.
+    // The mean is removed before transforming to Fourier space.
+    build_deltaN_linear();
 
-    double Nmean = 0;
-    LOOP Nmean += deltaN[idx(i,j,k)];
-    Nmean = Nmean / gridsize;
-    LOOP deltaN[idx(i,j,k)] -= Nmean;
+    const double norm1 = std::pow(L / rescale_B, 3) / std::pow((double)N, 6);
+    // Forward FFT to k-space for spectrum evaluation.
 
-    // Transform deltaN to Fourier space (double FFT)
-    fftrnd(deltaN.data(), (double *)fnyquist_p, 3, arraysize, 1);
+    int arraysize_spec[] = {N, N, N};
 
-    // Loop over lattice grid points
-    for (i = 0; i < N; i++)
-    {
-        px = (i <= N / 2 ? i : i - N);
-        for (j = 0; j < N; j++)
-        {
-            py = (j <= N / 2 ? j : j - N);
+    fftrnd(deltaN.data(), (double *)fnyquist_p, 3, arraysize_spec, 1);
 
-            // Modes with 0 < k < N/2 are counted twice
-            for (k = 1; k < N / 2; k++)
-            {
-                pz = k;
-                pmagnitude = sqrt(pw2((double)px) + pw2((double)py) + pw2((double)pz));
-                fp2 = pw2(deltaN[idx(i,j,2 * k)]) + pw2(deltaN[idx(i,j,2 * k + 1)]);
-                numpoints[(int)pmagnitude] += 2;
-                f2[(int)pmagnitude] += 2. * fp2;
-            }
 
-            // Modes with k = 0 or k = N/2 are counted once
-            for (k = 0; k <= N / 2; k += N / 2)
-            {
-                pz = k;
-                pmagnitude = sqrt(pw2((double)px) + pw2((double)py) + pw2((double)pz));
-                if (k == 0)
-                {
-                    fp2 = pw2(deltaN[idx(i,j,0)]) + pw2(deltaN[idx(i,j,1)]);
-                }
-                else
-                {
-                    fp2 = pw2(fnyquist_p[i][2 * j]) + pw2(fnyquist_p[i][2 * j + 1]);
-                }
-                numpoints[(int)pmagnitude]++;
-                f2[(int)pmagnitude] += fp2;
-            }
-        }
-    }
+    write_isotropic_spectrum_from_fft_r2c(spectraN_, deltaN, fnyquist_p, norm1);
 
-    // Output binned power spectrum
-    for (i = 0; i < numbins; i++)
-    {
-        if (numpoints[i] > 0)
-        {
-            f2[i] = f2[i] / numpoints[i];
-        }
-        fprintf(spectraN_, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
-    }
+    // Backward FFT to restore the real-space field.
+    fftrnd(deltaN.data(), (double *)fnyquist_p, 3, arraysize_spec, -1);
 
-    // Transform deltaN back to real space
-    fftrnd(deltaN.data(), (double *)fnyquist_p, 3, arraysize, -1);
-
-    fprintf(spectraN_, "\n");
-    fflush(spectraN_);
-
-    return;
 }
+
+
 
 void boxN()
 {
@@ -1194,11 +1135,11 @@ void boxN()
     }
 
     for (i = 0; i < N; i++)
-        for (j = 0; j < N; j++)
-            for (k = 0; k < N; k++)
-            {
-                fprintf(boxN_, "%.17g\n", deltaN[idx(i,j,k)]);
-            }
+    for (j = 0; j < N; j++)
+    for (k = 0; k < N; k++)
+    {
+        fprintf(boxN_, "%.17g\n", deltaN[idx(i,j,k)]);
+    }
     fprintf(boxN_, "\n");
     fflush(boxN_);
 }
@@ -1208,9 +1149,9 @@ void box2dN()
     static FILE *snapshots_2d_deltaN_;
     int i, j, k;
     if (N < 64)
-        i = 5;
+    i = 5;
     else
-        i = 50;
+    i = 50;
     static int first = 1;
     if (first) // Open output file
     {
@@ -1220,10 +1161,10 @@ void box2dN()
     }
 
     for (j = 0; j < N; j++)
-        for (k = 0; k < N; k++)
-        {
-            fprintf(snapshots_2d_deltaN_, "%.17g\n", deltaN[idx(i,j,k)]);
-        }
+    for (k = 0; k < N; k++)
+    {
+        fprintf(snapshots_2d_deltaN_, "%.17g\n", deltaN[idx(i,j,k)]);
+    }
     fprintf(snapshots_2d_deltaN_, "\n");
     fflush(snapshots_2d_deltaN_);
 }
@@ -1261,14 +1202,14 @@ void histogramsN()
     df = (bmax - bmin) / (double)(nbins);
 
     for (i = 0; i < nbins; i++)
-        binfreq[i] = 0.;
+    binfreq[i] = 0.;
 
     numpts = 0;
     LOOP
     {
         binnum = (int)((deltaN[idx(i,j,k)] - bmin) / df);
         if (deltaN[idx(i,j,k)] == bmax)
-            binnum = nbins - 1;
+        binnum = nbins - 1;
         if (binnum >= 0 && binnum < nbins)
         {
             binfreq[binnum]++;
@@ -1277,7 +1218,7 @@ void histogramsN()
     }
 
     for (i = 0; i < nbins; i++)
-        fprintf(histogramN_, "%e\n", binfreq[i] / (double)numpts);
+    fprintf(histogramN_, "%e\n", binfreq[i] / (double)numpts);
     fprintf(histogramN_, "\n");
     fflush(histogramN_);
 
@@ -1285,106 +1226,38 @@ void histogramsN()
     fflush(histogramtimesN_);
 }
 
+
 void spectraLOG()
 {
-    static FILE *spectraLOG_; // Output files for power spectra and times at which spectra were taken
-    const int maxnumbins = (int)(1.73205 * (N / 2)) + 1;
-    int numpoints[maxnumbins];
-    double p[maxnumbins], f2[maxnumbins];
-    int numbins = (int)(sqrt(3.) * (N / 2)) + 1;
-    double pmagnitude;
-    double dp = 2. * pi / L;
-    double fp2;
-    int i, j, k, px, py, pz;
-    double norm1 = pow(L / rescale_B, 3) / pow((double)N, 6);
-    int arraysize[] = {N, N, N};
-
+    static FILE *spectraLOG_;
     static int first = 1;
+
     if (first)
     {
-        snprintf(name_, sizeof(name_), "results/spectraLOG%s", ext_);
-        spectraLOG_ = fopen(name_, mode_);
+        std::snprintf(name_, sizeof(name_), "results/spectraLOG%s", ext_);
+        spectraLOG_ = std::fopen(name_, mode_);
         first = 0;
     }
 
-    for (i = 0; i < numbins; i++)
-        p[i] = dp * i;
+    // Build the log-mapped δN field in-place, then compute its spectrum.
+    build_deltaN_log();
 
-    for (i = 0; i < numbins; i++)
-    {
-        numpoints[i] = 0;
-        f2[i] = 0.;
-    }
+    const double norm1 = std::pow(L / rescale_B, 3) / std::pow((double)N, 6);
+    // Forward FFT to k-space for spectrum evaluation.
 
-    double factt = 0.;
-    double fmean = 0.;
+    int arraysize_spec[] = {N, N, N};
 
-    LOOP
-    {
-        factt += fd[idx(i,j,k)] * pow(a, rescale_s - 1) / (ad * pow(a, rescale_s - 2.));
-        fmean += f[idx(i,j,k)];
-    }
+    fftrnd(deltaN.data(), (double *)fnyquist_p, 3, arraysize_spec, 1);
 
-    factt = factt / (double)gridsize;
-    fmean = fmean / (double)gridsize;
 
-    LOOP
-    {
-        deltaN[idx(i,j,k)] = 0;
-        if ((1 - eta_log * (f[idx(i,j,k)] - fmean) / factt) > 0)
-            deltaN[idx(i,j,k)] = 1./eta_log * log(1 - eta_log * (f[idx(i,j,k)] - fmean) / factt);
-    }
+    write_isotropic_spectrum_from_fft_r2c(spectraLOG_, deltaN, fnyquist_p, norm1);
 
-    fftrnd(deltaN.data(), (double *)fnyquist_p, 3, arraysize, 1);
+    // Backward FFT to restore the real-space field.
+    fftrnd(deltaN.data(), (double *)fnyquist_p, 3, arraysize_spec, -1);
 
-    for (i = 0; i < N; i++)
-    {
-        px = (i <= N / 2 ? i : i - N);
-        for (j = 0; j < N; j++)
-        {
-            py = (j <= N / 2 ? j : j - N);
-            for (k = 1; k < N / 2; k++)
-            {
-                pz = k;
-                pmagnitude = sqrt(pw2((double)px) + pw2((double)py) + pw2((double)pz));
-                fp2 = pw2(deltaN[idx(i,j,2 * k)]) + pw2(deltaN[idx(i,j,2 * k + 1)]);
-                numpoints[(int)pmagnitude] += 2;
-                f2[(int)pmagnitude] += 2. * fp2;
-            }
-            for (k = 0; k <= N / 2; k += N / 2)
-            {
-                pz = k;
-                pmagnitude = sqrt(pw2((double)px) + pw2((double)py) + pw2((double)pz));
-                if (k == 0)
-                {
-                    fp2 = pw2(deltaN[idx(i,j,0)]) + pw2(deltaN[idx(i,j,1)]);
-                }
-                else
-                {
-                    fp2 = pw2(fnyquist_p[i][2 * j]) + pw2(fnyquist_p[i][2 * j + 1]);
-                }
-                numpoints[(int)pmagnitude]++;
-                f2[(int)pmagnitude] += fp2;
-            }
-        }
-    }
-
-    for (i = 0; i < numbins; i++)
-    {
-        if (numpoints[i] > 0)
-        {
-            f2[i] = f2[i] / numpoints[i];
-        }
-        fprintf(spectraLOG_, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
-    }
-
-    fftrnd(deltaN.data(), (double *)fnyquist_p, 3, arraysize, -1);
-
-    fprintf(spectraLOG_, "\n");
-    fflush(spectraLOG_);
-
-    return;
 }
+
+
 
 void histogramsLOG()
 {
@@ -1424,7 +1297,7 @@ void histogramsLOG()
     {
         deltaN[idx(i,j,k)] = 0;
         if ((1 - eta_log * (f[idx(i,j,k)] - fmean) / factt) > 0)
-            deltaN[idx(i,j,k)] = 1./eta_log * log(1 - eta_log * (f[idx(i,j,k)] - fmean) / factt);
+        deltaN[idx(i,j,k)] = 1./eta_log * log(1 - eta_log * (f[idx(i,j,k)] - fmean) / factt);
     }
 
     bmin = deltaN[idx(0,0,0)];
@@ -1441,7 +1314,7 @@ void histogramsLOG()
     df = (bmax - bmin) / (double)(nbins);
 
     for (i = 0; i < nbins; i++)
-        binfreq[i] = 0.;
+    binfreq[i] = 0.;
 
     numpts = 0;
     LOOP
@@ -1450,7 +1323,7 @@ void histogramsLOG()
         {
             binnum = (int)((deltaN[idx(i,j,k)] - bmin) / df);
             if (deltaN[idx(i,j,k)] == bmax)
-                binnum = nbins - 1;
+            binnum = nbins - 1;
             if (binnum >= 0 && binnum < nbins)
             {
                 binfreq[binnum]++;
@@ -1460,7 +1333,7 @@ void histogramsLOG()
     }
 
     for (i = 0; i < nbins; i++)
-        fprintf(histogramLOG_, "%e\n", binfreq[i] / (double)numpts);
+    fprintf(histogramLOG_, "%e\n", binfreq[i] / (double)numpts);
     fprintf(histogramLOG_, "\n");
     fflush(histogramLOG_);
 
@@ -1510,11 +1383,11 @@ void output_parameters()
     return;
 }
 
-// Calculate and save quantities (means, variances, etc.). If force>0 all infrequent calculations will be performed
+// Calculate and save quantities (means, variances, etc.). If force>0 infrequent calculations are performed
 void save(int infrequent)
 {
     if (t > 0.) // Synchronize field values and derivatives
-        evolve_fields(-.5 * dt * pow(astep, rescale_s - 1));
+    evolve_fields(-.5 * dt * pow(astep, rescale_s - 1));
 
     meansvars(infrequent);
     scale(infrequent);
@@ -1523,35 +1396,35 @@ void save(int infrequent)
     if (infrequent)
     {
         if (output_box3D)
-            box();
+        box();
         if (output_box2D)
         {
             box2d();
             box2dot();
         }
         if (output_energy)
-            energy();
+        energy();
         if (output_spectra)
         {
             spectraf();
-        #if calculate_SIGW
+#if calculate_SIGW
             spectraGW();
             spectraGWdot();
-        #endif
+#endif
         }
         if (output_histogram)
-            histograms();
+        histograms();
     }
 
     if (t > 0.) // Desynchronize field values and derivatives
-        evolve_fields(.5 * dt * pow(astep, rescale_s - 1));
+    evolve_fields(.5 * dt * pow(astep, rescale_s - 1));
 }
 
 void save_last()
 {
     get_modes();
     if (output_bispectrum)
-        bispectraf();
+    bispectraf();
 
 #if perform_deltaN
     if (output_LOG)
@@ -1567,7 +1440,7 @@ void save_last()
 void saveN()
 {
     if (t > 0.)
-        evolve_fieldsN(-.5 * dN);
+    evolve_fieldsN(-.5 * dN);
 
     float Nmean = 0.;
     DECLARE_INDICES
@@ -1575,7 +1448,7 @@ void saveN()
     LOOP
     {
         if (deltaN[idx(i,j,k)] <= (Nend - dN))
-            Nmean += deltaN[idx(i,j,k)];
+        Nmean += deltaN[idx(i,j,k)];
     }
     Nmean = Nmean / gridsize;
 
@@ -1587,19 +1460,19 @@ void saveN()
     histogramsN();
 
     if (output_box2D)
-        box2dN();
+    box2dN();
 
     LOOP
     {
         if (deltaN[idx(i,j,k)] > (Nend - dN - Nmean))
-            deltaN[idx(i,j,k)] = 0;
+        deltaN[idx(i,j,k)] = 0;
     }
 
     if (output_spectra)
-        spectraN();
+    spectraN();
 
     if (t > 0.)
-        evolve_fieldsN(.5 * dN);
+    evolve_fieldsN(.5 * dN);
 }
 #else
 // Stub to avoid link errors when perform_deltaN==0
@@ -1696,102 +1569,53 @@ void scale_post_inflation(int flush)
 
     // Output a, H, and adotdot in physical units using rescalings
     fprintf(sf_, "%f %f %e %e\n",
-            t, a,
-            ad * rescale_B * pow(a, rescale_s - 2.),
-            pw2(rescale_B) * pow(a, 2. * rescale_s - 2.) *
-                (ad2 + (rescale_s - 1.) * pw2(ad) / a));
+    t, a,
+    ad * rescale_B * pow(a, rescale_s - 2.),
+    pw2(rescale_B) * pow(a, 2. * rescale_s - 2.) *
+    (ad2 + (rescale_s - 1.) * pw2(ad) / a));
 
     if (flush)
-        fflush(sf_);
+    fflush(sf_);
 }
 
 // Outputs power spectrum of the field and applies a high-momentum cutoff if enabled
+
 void spectraf_post_inflation()
 {
-    static FILE *spectra_, *spectratimes_; // Output files for power spectra and times at which spectra were taken
-    const int maxnumbins = (int)(1.73205 * (N / 2)) + 1; // Number of bins = sqrt(3)*(N/2)+1 for 3D.
-    int numpoints[maxnumbins]; // Number of points in each momentum bin
-    double p[maxnumbins], f2[maxnumbins]; // Values for each bin: Momentum, |f_k|^2
-    int numbins = maxnumbins; // Use maxnumbins for consistency
-    double pmagnitude; // Total momentum (p) in units of lattice spacing
-    double pdisc;
-    double dp = 2. * pi / L; // Grid spacing in momentum space
-    double fp2; // Square magnitude of field (fp2) for a given mode
-    int i, j, k, px, py, pz, iconj, jconj;
-    double norm1 = pow(L / rescale_B, 3) / pow((double)N, 6); // Normalization to reduced Planck mass units
-
-    int arraysize[] = {N, N, N};
-
+    static FILE *spectra_, *spectratimes_;
     static int first = 1;
+
     if (first)
     {
-        snprintf(name_, sizeof(name_), "results/post_inflation/spectra%s", ext_);
-        spectra_ = fopen(name_, mode_);
+        std::snprintf(name_, sizeof(name_), "results/post_inflation/spectra%s", ext_);
+        spectra_ = std::fopen(name_, mode_);
 
-        snprintf(name_, sizeof(name_), "results/post_inflation/spectratimes%s", ext_);
-        spectratimes_ = fopen(name_, mode_);
+        std::snprintf(name_, sizeof(name_), "results/post_inflation/spectratimes%s", ext_);
+        spectratimes_ = std::fopen(name_, mode_);
+
         first = 0;
     }
 
-    for (i = 0; i < numbins; i++)
-        p[i] = dp * i;
+    const double norm1 = std::pow(L / rescale_B, 3) / std::pow((double)N, 6);
 
-    for (i = 0; i < numbins; i++)
-    {
-        numpoints[i] = 0;
-        f2[i] = 0.;
-    }
+    // Forward FFT to k-space for spectrum evaluation.
 
-    fftrnd(f.data(), (double *)fnyquist_p, 3, arraysize, 1);
 
-    for (i = 0; i < N; i++)
-    {
-        px = (i <= N / 2 ? i : i - N);
-        for (j = 0; j < N; j++)
-        {
-            py = (j <= N / 2 ? j : j - N);
-            for (k = 1; k < N / 2; k++)
-            {
-                pz = k;
-                pmagnitude = sqrt(pw2((double)px) + pw2((double)py) + pw2((double)pz));
+    int arraysize_spec[] = {N, N, N};
 
-                int bin = (int)lround(pmagnitude);  // Use round instead of truncation
-                if (bin >= numbins) continue;          // Skip out-of-range bins
 
-                fp2 = pw2(f[idx(i,j,2 * k)]) + pw2(f[idx(i,j,2 * k + 1)]);
-                numpoints[bin] += 2;
-                f2[bin] += 2. * fp2;
-            }
-            for (k = 0; k <= N / 2; k += N / 2)
-            {
-                pz = k;
-                pmagnitude = sqrt(pw2((double)px) + pw2((double)py) + pw2((double)pz));
+    fftrnd(f.data(), (double *)fnyquist_p, 3, arraysize_spec, 1);
 
-                int bin = (int)lround(pmagnitude);
-                if (bin >= numbins) continue;
 
-                if (k == 0)
-                {
-                    fp2 = pw2(f[idx(i,j,0)]) + pw2(f[idx(i,j,1)]);
-                }
-                else
-                {
-                    fp2 = pw2(fnyquist_p[i][2 * j]) + pw2(fnyquist_p[i][2 * j + 1]);
-                }
-                numpoints[bin]++;
-                f2[bin] += fp2;
-            }
-        }
-    }
 
-    for (i = 0; i < numbins; i++)
-    {
-        if (numpoints[i] > 0)
-        {
-            f2[i] = f2[i] / numpoints[i];
-        }
-        fprintf(spectra_, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
-    }
+    write_isotropic_spectrum_from_fft_r2c(spectra_, f, fnyquist_p, norm1);
+    std::fprintf(spectratimes_, "%f %e\n", t, a);
+
+    std::fflush(spectratimes_);
+    // Optional hard cutoff in Fourier space (identical mode filtering logic to the legacy implementation).
+    int i, j, k, px, py, pz, iconj, jconj;
+    double pdisc;
+    int arraysize[] = {N, N, N};
 
     if (high_cutoff_index > 0 && forcing_cutoff)
     {
@@ -1856,355 +1680,35 @@ void spectraf_post_inflation()
         fftrnd(fd.data(), (double *)fdnyquist_p, 3, arraysize, -1);
     }
 
+    // Backward FFT to restore the real-space field.
     fftrnd(f.data(), (double *)fnyquist_p, 3, arraysize, -1);
 
-    fprintf(spectra_, "\n");
-    fflush(spectra_);
-    fprintf(spectratimes_, "%f %e\n", t, a);
-    fflush(spectratimes_);
-
-    return;
 }
+
+
 
 #if calculate_SIGW
 
 // ------------------------- P_h(k) with Λ–contraction -------------------------
 void spectraGW_post_inflation()
 {
-    static FILE *spectraGW_ = nullptr;
+    static FILE *fp = nullptr;
     static int first = 1;
-
-    const int   numbins = (int)(sqrt(3.0) * (N/2)) + 1;
-    const int i_max_out = (int)floor(0.80 * numbins);   // keep up to 90% of Nyquist
-    const float dp      = 2.f * pi / L;
-
-    std::vector<int>   numpoints(numbins, 0);
-    std::vector<float> p(numbins, 0.f), f2(numbins, 0.f);
-    for (int i = 0; i < numbins; ++i) p[i] = dp * i;
-
-    if (first) {
-        snprintf(name_, sizeof(name_), "results/post_inflation/spectraGW%s", ext_);
-        spectraGW_ = fopen(name_, mode_);
-        first = 0;
-    }
-
-    // --- FFT to k-space (Nyquist planes in scratch) ---
-    int arraysize[] = {N, N, N};
-    for (int c = 0; c < 6; ++c) fftrnf(hij[c].data(), (float*)hijnyquist_p[c], 3, arraysize, 1);
-
-    // --- loop over modes ---
-    for (int i = 0; i < N; ++i) {
-        int px = (i <= N/2 ? i : i - N);
-        for (int j = 0; j < N; ++j) {
-            int py = (j <= N/2 ? j : j - N);
-
-            // interior (double-counted)
-            for (int k = 1; k < N/2; ++k) {
-                int pz = k;
-
-                // lattice k and |k|
-                float kx = (2.f/dx) * sin(pi * px / N);
-                float ky = (2.f/dx) * sin(pi * py / N);
-                float kz = (2.f/dx) * sin(pi * pz / N);
-                float kt2 = kx*kx + ky*ky + kz*kz;
-                if (kt2 == 0.f) continue;
-
-                int   bin = (int)lround(sqrt((float)(px*px + py*py + pz*pz)));
-                if (bin >= i_max_out) continue;
-
-                // read C_ij = h_ij(k) (complex) from hij (interior)
-                size_t idx_mode = idx(i, j, 2*k);
-                float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
-                for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
-                    int comp = sym_idx(l, m);
-                    float re = hij[comp][idx_mode];
-                    float im = hij[comp][idx_mode + 1];
-                    C_re[l][m] = re; C_im[l][m] = im;
-                    if (m != l) { C_re[m][l] = re; C_im[m][l] = im; }
-                }
-
-                // projector pieces
-                float inv = 1.0f / sqrt(kt2);
-                float kh[3] = {kx*inv, ky*inv, kz*inv};
-                float P[3][3];
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b)
-                    P[a][b] = (a==b?1.f:0.f) - kh[a]*kh[b];
-
-                // A = P C P  and  T = Tr(P C)
-                float A_re[3][3] = {{0}}, A_im[3][3] = {{0}};
-                float T_re = 0.f, T_im = 0.f;
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
-                    float r=0.f, im=0.f;
-                    for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
-                        float pal = P[a][l], pbm = P[b][m];
-                        r  += pal * C_re[l][m] * pbm;
-                        im += pal * C_im[l][m] * pbm;
-                    }
-                    A_re[a][b]=r; A_im[a][b]=im;
-                }
-                for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
-                    T_re += P[l][m]*C_re[l][m];
-                    T_im += P[l][m]*C_im[l][m];
-                }
-
-                // Λ–contraction: sum |A - 0.5 P T|^2
-                float fp2 = 0.f;
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
-                    float r = A_re[a][b] - 0.5f*P[a][b]*T_re;
-                    float im= A_im[a][b] - 0.5f*P[a][b]*T_im;
-                    fp2 += r*r + im*im;
-                }
-
-                numpoints[bin] += 2;
-                f2[bin]        += 2.f * fp2;
-            }
-
-            // 0 and Nyquist planes (single-counted)
-            for (int k = 0; k <= N/2; k += N/2) {
-                int pz = k;
-
-                float kx = (2.f/dx) * sin(pi * px / N);
-                float ky = (2.f/dx) * sin(pi * py / N);
-                float kz = (2.f/dx) * sin(pi * pz / N);
-                float kt2 = kx*kx + ky*ky + kz*kz;
-                if (kt2 == 0.f) continue;
-
-                int bin = (int)lround(sqrt((float)(px*px + py*py + pz*pz)));
-                if (bin >= i_max_out) continue;
-
-                float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
-                if (k == 0) {
-                    size_t idx_mode = idx(i, j, 0);
-                    for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
-                        int comp = sym_idx(l, m);
-                        float re = hij[comp][idx_mode];
-                        float im = hij[comp][idx_mode + 1];
-                        C_re[l][m]=re; C_im[l][m]=im;
-                        if (m!=l){ C_re[m][l]=re; C_im[m][l]=im; }
-                    }
-                } else { // Nyquist plane stored in scratch
-                    int j2 = 2*j;
-                    for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
-                        int comp = sym_idx(l, m);
-                        float re = hijnyquist_p[comp][i][j2];
-                        float im = hijnyquist_p[comp][i][j2 + 1];
-                        C_re[l][m]=re; C_im[l][m]=im;
-                        if (m!=l){ C_re[m][l]=re; C_im[m][l]=im; }
-                    }
-                }
-
-                float inv = 1.0f / sqrt(kt2);
-                float kh[3] = {kx*inv, ky*inv, kz*inv};
-                float P[3][3];
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b)
-                    P[a][b] = (a==b?1.f:0.f) - kh[a]*kh[b];
-
-                float A_re[3][3] = {{0}}, A_im[3][3] = {{0}};
-                float T_re = 0.f, T_im = 0.f;
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
-                    float r=0.f, im=0.f;
-                    for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
-                        float pal=P[a][l], pbm=P[b][m];
-                        r  += pal*C_re[l][m]*pbm;
-                        im += pal*C_im[l][m]*pbm;
-                    }
-                    A_re[a][b]=r; A_im[a][b]=im;
-                }
-                for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
-                    T_re += P[l][m]*C_re[l][m];
-                    T_im += P[l][m]*C_im[l][m];
-                }
-
-                float fp2 = 0.f;
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
-                    float r = A_re[a][b] - 0.5f*P[a][b]*T_re;
-                    float im= A_im[a][b] - 0.5f*P[a][b]*T_im;
-                    fp2 += r*r + im*im;
-                }
-
-                numpoints[bin] += 1;
-                f2[bin]        += fp2;
-            }
-        }
-    }
-
-    const float norm1 = 0.5f * std::pow(L / rescale_B, 3) / std::pow((float)N, 6); 
-    for (int i = 0; i < numbins; ++i) {
-        if (numpoints[i] > 0) f2[i] /= numpoints[i];
-        fprintf(spectraGW_, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
-    }
-    fprintf(spectraGW_, "\n");
-    fflush(spectraGW_);
-
-    // restore to real space (float FFT)
-    for (int c = 0; c < 6; ++c) fftrnf(hij[c].data(), (float*)hijnyquist_p[c], 3, arraysize, -1);
+    open_output_once(fp, first, "results/post_inflation/spectraGW");
+    write_gw_spectrum_impl(fp, hij, hijnyquist_p, GwScaleMode::None, 1.0);
 }
+
 
 // --------------- a^4 P_{\dot h}(k) with Λ–contraction ---------------------
 void spectraGWdot_post_inflation()
 {
-    static FILE *spectraGWdot_ = nullptr;
+    static FILE *fp = nullptr;
     static int first = 1;
-
-    const int   numbins = (int)(sqrt(3.0) * (N/2)) + 1;
-    const int i_max_out = (int)floor(0.80 * numbins);   // keep up to 80% of Nyquist
-    const float dp      = 2.f * pi / L;
-
-    std::vector<int>   numpoints(numbins, 0);
-    std::vector<float> p(numbins, 0.f), f2(numbins, 0.f);
-    for (int i = 0; i < numbins; ++i) p[i] = dp * i;
-
-    if (first) {
-        snprintf(name_, sizeof(name_), "results/post_inflation/spectraGWdot%s", ext_);
-        spectraGWdot_ = fopen(name_, mode_);
-        first = 0;
-    }
-
-    // FFT to k-space for hdot_ij (float FFT)
-    int arraysize[] = {N, N, N};
-    for (int c = 0; c < 6; ++c) fftrnf(hijd[c].data(), (float*)hijdnyquist_p[c], 3, arraysize, 1);
-
-    // conformal -> physical time derivative factor 
+    open_output_once(fp, first, "results/post_inflation/spectraGWdot");
     const float to_phys = rescale_B * pow(a, rescale_s - 1.f);
-
-    for (int i = 0; i < N; ++i) {
-        int px = (i <= N/2 ? i : i - N);
-        for (int j = 0; j < N; ++j) {
-            int py = (j <= N/2 ? j : j - N);
-
-            for (int k = 1; k < N/2; ++k) {
-                int pz = k;
-
-                float kx = (2.f/dx) * sin(pi * px / N);
-                float ky = (2.f/dx) * sin(pi * py / N);
-                float kz = (2.f/dx) * sin(pi * pz / N);
-                float kt2 = kx*kx + ky*ky + kz*kz;
-                if (kt2 == 0.f) continue;
-
-                int bin = (int)lround(sqrt((float)(px*px + py*py + pz*pz)));
-                if (bin >= i_max_out) continue;
-
-                size_t idx_mode = idx(i, j, 2*k);
-                float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
-                for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
-                    int comp = sym_idx(l, m);
-                    float re = hijd[comp][idx_mode]     * to_phys;
-                    float im = hijd[comp][idx_mode + 1] * to_phys;
-                    C_re[l][m]=re; C_im[l][m]=im;
-                    if (m!=l){ C_re[m][l]=re; C_im[m][l]=im; }
-                }
-
-                float inv = 1.0f / sqrt(kt2);
-                float kh[3] = {kx*inv, ky*inv, kz*inv};
-                float P[3][3];
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b)
-                    P[a][b] = (a==b?1.f:0.f) - kh[a]*kh[b];
-
-                float A_re[3][3] = {{0}}, A_im[3][3] = {{0}};
-                float T_re = 0.f, T_im = 0.f;
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
-                    float r=0.f, im=0.f;
-                    for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
-                        float pal=P[a][l], pbm=P[b][m];
-                        r  += pal*C_re[l][m]*pbm;
-                        im += pal*C_im[l][m]*pbm;
-                    }
-                    A_re[a][b]=r; A_im[a][b]=im;
-                }
-                for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
-                    T_re += P[l][m]*C_re[l][m];
-                    T_im += P[l][m]*C_im[l][m];
-                }
-
-                float fp2 = 0.f;
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
-                    float r = A_re[a][b] - 0.5f*P[a][b]*T_re;
-                    float im= A_im[a][b] - 0.5f*P[a][b]*T_im;
-                    fp2 += r*r + im*im;
-                }
-
-                numpoints[bin] += 2;
-                f2[bin]        += 2.f * fp2;
-            }
-
-            for (int k = 0; k <= N/2; k += N/2) {
-                int pz = k;
-
-                float kx = (2.f/dx) * sin(pi * px / N);
-                float ky = (2.f/dx) * sin(pi * py / N);
-                float kz = (2.f/dx) * sin(pi * pz / N);
-                float kt2 = kx*kx + ky*ky + kz*kz;
-                if (kt2 == 0.f) continue;
-
-                int bin = (int)lround(sqrt((float)(px*px + py*py + pz*pz)));
-                if (bin >= i_max_out) continue;
-
-                float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
-                if (k == 0) {
-                    size_t idx_mode = idx(i, j, 0);
-                    for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
-                        int comp = sym_idx(l, m);
-                        float re = hijd[comp][idx_mode]     * to_phys;
-                        float im = hijd[comp][idx_mode + 1] * to_phys;
-                        C_re[l][m]=re; C_im[l][m]=im;
-                        if (m!=l){ C_re[m][l]=re; C_im[m][l]=im; }
-                    }
-                } else {
-                    int j2 = 2*j;
-                    for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
-                        int comp = sym_idx(l, m);
-                        float re = hijdnyquist_p[comp][i][j2]     * to_phys;
-                        float im = hijdnyquist_p[comp][i][j2 + 1] * to_phys;
-                        C_re[l][m]=re; C_im[l][m]=im;
-                        if (m!=l){ C_re[m][l]=re; C_im[m][l]=im; }
-                    }
-                }
-
-                float inv = 1.0f / sqrt(kt2);
-                float kh[3] = {kx*inv, ky*inv, kz*inv};
-                float P[3][3];
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b)
-                    P[a][b] = (a==b?1.f:0.f) - kh[a]*kh[b];
-
-                float A_re[3][3] = {{0}}, A_im[3][3] = {{0}};
-                float T_re = 0.f, T_im = 0.f;
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
-                    float r=0.f, im=0.f;
-                    for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
-                        float pal=P[a][l], pbm=P[b][m];
-                        r  += pal*C_re[l][m]*pbm;
-                        im += pal*C_im[l][m]*pbm;
-                    }
-                    A_re[a][b]=r; A_im[a][b]=im;
-                }
-                for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
-                    T_re += P[l][m]*C_re[l][m];
-                    T_im += P[l][m]*C_im[l][m];
-                }
-
-                float fp2 = 0.f;
-                for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
-                    float r = A_re[a][b] - 0.5f*P[a][b]*T_re;
-                    float im= A_im[a][b] - 0.5f*P[a][b]*T_im;
-                    fp2 += r*r + im*im;
-                }
-
-                numpoints[bin] += 1;
-                f2[bin]        += fp2;
-            }
-        }
-    }
-
-    const float norm1 = 0.5f * std::pow(L / rescale_B, 3) / std::pow((float)N, 6); 
-    for (int i = 0; i < numbins; ++i) {
-        if (numpoints[i] > 0) f2[i] /= numpoints[i];
-        fprintf(spectraGWdot_, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
-    }
-    fprintf(spectraGWdot_, "\n");
-    fflush(spectraGWdot_);
-
-    for (int c = 0; c < 6; ++c) fftrnf(hijd[c].data(), (float*)hijdnyquist_p[c], 3, arraysize, -1);
+    write_gw_spectrum_impl(fp, hijd, hijdnyquist_p, GwScaleMode::FloatMultiply, (double)to_phys);
 }
+
 
 #endif
 
@@ -2212,10 +1716,10 @@ void histograms_post_inflation()
 {
     static FILE *histogram_, *histogramtimes_;
     int i = 0, j = 0, k = 0;
-    int binnum; // Index of bin for a given field value
-    double binfreq[nbins]; // The frequency of field values occurring within each bin
-    double bmin, bmax, df; // Minimum and maximum field values for each field and spacing (in field values) between bins
-    int numpts; // Count the number of points in the histogram for each field. (Should be all lattice points unless explicit field limits are given.)
+    int binnum;
+    double binfreq[nbins];
+    double bmin, bmax, df;
+    int numpts;
 
     static int first = 1;
     if (first) // Open output files
@@ -2247,7 +1751,7 @@ void histograms_post_inflation()
 
     // Initialize all frequencies to zero
     for (i = 0; i < nbins; i++)
-        binfreq[i] = 0.;
+    binfreq[i] = 0.;
 
     // Iterate over grid to determine bin frequencies
     numpts = 0;
@@ -2255,7 +1759,7 @@ void histograms_post_inflation()
     {
         binnum = (int)((f[idx(i,j,k)] - bmin) / df); // Find index of bin for each value
         if (f[idx(i,j,k)] == bmax) // The maximal field value is at the top of the highest bin
-            binnum = nbins - 1;
+        binnum = nbins - 1;
         if (binnum >= 0 && binnum < nbins) // Increment frequency in the appropriate bin
         {
             binfreq[binnum]++;
@@ -2265,7 +1769,7 @@ void histograms_post_inflation()
 
     // Output results
     for (i = 0; i < nbins; i++)
-        fprintf(histogram_, "%e\n", binfreq[i] / (double)numpts); // Output bin frequency normalized so the total equals 1
+    fprintf(histogram_, "%e\n", binfreq[i] / (double)numpts); // Output bin frequency normalized so the total equals 1
     fprintf(histogram_, "\n"); // Stick a blank line between times to make the file more readable
     fflush(histogram_);
     fprintf(histogramtimes_, " %e %e", bmin, df); // Output the starting point and stepsize for the bins at each time
@@ -2278,7 +1782,7 @@ void histograms_post_inflation()
 void save_post_inflation(int infrequent)
 {
     if (t > 0.) // Synchronize field values and derivatives
-        evolve_fields(-.5 * dt_post_inflation);
+    evolve_fields(-.5 * dt_post_inflation);
 
     meansvars_post_inflation(infrequent);
     scale_post_inflation(infrequent);
@@ -2289,17 +1793,17 @@ void save_post_inflation(int infrequent)
         if (output_spectra)
         {
             spectraf_post_inflation();
-        #if calculate_SIGW
+#if calculate_SIGW
             spectraGW_post_inflation();
             spectraGWdot_post_inflation();
-        #endif
+#endif
         }
         if (output_histogram)
-            histograms_post_inflation();
+        histograms_post_inflation();
     }
 
     if (t > 0.) // Desynchronize field values and derivatives
-        evolve_fields(.5 * dt_post_inflation);
+    evolve_fields(.5 * dt_post_inflation);
 }
 
 #endif

@@ -1,106 +1,144 @@
-// -------------------- InflationEasy Configuration Flags --------------------
+// parameters.h - Simulation configuration (compile-time / run-time constants)
+//
+// This header contains the knobs that define *what* the code runs and *how* it runs:
+// - feature toggles (numerical potential, deltaN, SIGWs, post-inflation phase)
+// - lattice size and stepping parameters
+// - model parameters for either a numerical or analytic potential
+// - output switches and numerical cutoffs
+//
+// Conventions:
+// - Preprocessor flags (#define) enable/disable modules at compile time.
+// - Constants (const ...) are read by the code as fixed parameters.
+//
 
-// Set to 1 to enable a numerical potential loaded from file, 0 for analytic expression
+// -------------------- Feature toggles --------------------
+
+// 1: load inflaton potential from file; 0: use analytic potential.
 #define numerical_potential 1
 
-// Set to 1 to perform deltaN evolution to calculate zeta
+// 1: evolve the auxiliary deltaN system to compute zeta.
 #define perform_deltaN 1
 
-// Set to 1 to enable the calculation of SIGWs
+// 1: compute scalar-induced gravitational waves (SIGWs) during inflation.
 #define calculate_SIGW 1
 
-// Set to 1 to enable the post-inflation calculation of SIGWs
+// 1: extend SIGW computation to a post-inflationary phase.
 #define post_inflation 1
 
-// -------------------- Lattice and Evolution Parameters --------------------
+// -------------------- Lattice and evolution parameters --------------------
 
-// Number of points along each spatial dimension (total lattice points will be N^3)
-const int N = 32; // Must be a power of 2
+// Number of grid points per spatial dimension (total grid size N^3).
+// Must be a power of 2 for the FFT routines used in the code.
+const int N = 128;
 
-// Rescaling exponent (must be 0 unless you've tested otherwise)
+// Field-rescaling exponent used by the code's internal conventions.
+// Keep at 0 unless you have validated an alternative scaling.
 const double rescale_s = 0.0;
 
-// Final scale factor value (simulation stops when a >= af)
+// End condition for the inflationary evolution (stop once a >= af).
 const double af = 2*N;
 
-// Random seed for generating initial vacuum fluctuations
+// Seed for the random-number generator used to initialize vacuum fluctuations.
 const int seed = 8;
 
-// -------------------- Physical Model Parameters --------------------
+// -------------------- Physical model parameters --------------------
 
 #if numerical_potential
-// Parameters used if the potential is loaded from file
+// Numerical-potential branch: the potential and its derivative are read from file.
+// The parameters below set the overall normalization and initial conditions.
 
-const double V0 = 3e-9; // Potential parameter
-const double rescale_B = std::sqrt(V0); // Rescaling factor (see doc)
-const double initial_field = 2.9181235049318586; // Initial field value
-const double initial_derivative = -0.06727651095116181; // Initial field velocity (in code units)
-const double L = 10.0; //10 Comoving box size in code units (must be sub-horizon at start)
-const double dt = 0.001; // Time step
-// Output frequency in time steps (standard and infrequent quantities)
+const double V0 = 3e-9; // Potential normalization (model-dependent)
+const double rescale_B = std::sqrt(V0); // Field/energy rescaling factor (see documentation)
+
+// Homogeneous initial conditions (field value and velocity in code units)
+const double initial_field = 2.9181235049318586;
+const double initial_derivative = -0.06727651095116181;
+
+// Comoving box size (code units). Must be sub-horizon at initialization.
+const double L = 10.0;
+
+// Time step used during inflationary evolution.
+const double dt = 0.001;
+
+// Output cadences (in number of time steps).
+// "Standard" quantities and "infrequent/heavier" quantities can be separated.
 const int output_freq = 500;
 const int output_infrequent_freq = 500;
 
 #if perform_deltaN
-const double dN = 0.0001; // e-fold increment in deltaN evolution
-const double Nend = 5.0;   // Final e-folding time for deltaN run
-//const double phiref_manual = 2.680654050913246; // (Optional) manually set the reference ϕ value
+// deltaN evolution parameters.
+const double dN = 0.0001; // Step in e-folds for deltaN integration
+const double Nend = 5.0;  // Final e-fold time for deltaN run
 
-// Set monotonic_potential = 1 if the potential increases with |ϕ|
-// Set antimonotonic_potential = 1 if it decreases with |ϕ|
-// Leave both set to 0 for general potentials, in which case deltaN evolution is slower. 
+// Optional manual reference field value for terminating/defining deltaN.
+//const double phiref_manual = 2.680654050913246;
+
+// Monotonicity hints for the potential table.
+// - monotonic_potential = 1 if V increases with |phi|
+// - antimonotonic_potential = 1 if V decreases with |phi|
+// Set both to 0 for a general non-monotonic potential (slower but robust).
 #define monotonic_potential 1
 #define antimonotonic_potential 0
 
 #endif
 
 #if post_inflation
+// Post-inflation evolution controls (if enabled).
 const double horizon_factor = 1.0;
-const double omega = 1.0/3.0; //Equation of state parameter. Only tested for radiation.
+
+// Equation of state parameter w (only tested for radiation: w = 1/3).
+const double omega = 1.0/3.0;
+
 const double dt_post_inflation = 0.001;
 const double af_post_inflation = 2.*N*horizon_factor;
 #endif
 
 #else
-// Parameters used for an analytic potential (defaults are for quadratic potential)
+// Analytic-potential branch: parameters below correspond to the chosen analytic V(phi).
+// The defaults shown here are for a quadratic potential.
 
-const double V0 = 3.338e-13; // Potential parameter
-const double ns = 0.97; // Spectral index
-const double rescale_B = std::sqrt(V0); // Rescaling factor (see doc)
-const double initial_field = 0.0935; // Initial field value
-const double initial_derivative = 0.000796; // Initial field velocity (in code units)
-const double L = 10.0; // Comoving box size in code units (must be sub-horizon at start)
-const double dt = 0.0005; // Time step
-// Output frequency in time steps (standard and infrequent quantities)
+const double V0 = 3.338e-13; // Potential normalization
+const double ns = 0.97;       // Spectral index (used by some analytic setups)
+const double rescale_B = std::sqrt(V0);
+
+const double initial_field = 0.0935;
+const double initial_derivative = 0.000796;
+
+const double L = 10.0;   // Comoving box size (must be sub-horizon initially)
+const double dt = 0.0005;
+
+// Output cadences (in number of time steps).
 const int output_freq = 200;
 const int output_infrequent_freq = 200;
 
 #if perform_deltaN
-const double dN = 0.0000001; // e-fold increment in deltaN evolution
-const double Nend = 0.001; // Final e-folding time for deltaN run
-// const double phiref_manual = value; // (Optional) manually set the reference ϕ value
+// deltaN evolution parameters (analytic-potential branch).
+const double dN = 0.0000001;
+const double Nend = 0.001;
 
-// Set monotonic_potential = 1 if the potential increases with |ϕ|
-// Set antimonotonic_potential = 1 if it decreases with |ϕ|
-// Leave both set to 0 for general potentials, in which case deltaN evolution is slower.
+// Optional manual reference field value for terminating/defining deltaN.
+// const double phiref_manual = value;
+
+// Monotonicity hints for the analytic potential.
 #define monotonic_potential 0
 #define antimonotonic_potential 1
 
 #endif
 #endif
 
-// -------------------- Momentum Cutoff Options --------------------
+// -------------------- Momentum cutoff options --------------------
 
-// Set high_cutoff_index > 0 to cutoff modes with k > (2 pi/L)*high_index and k < (2 pi/L)*low_index
+// If high_cutoff_index > 0: remove modes with k > (2*pi/L)*high_cutoff_index.
+// If low_cutoff_index  > 0: remove modes with k < (2*pi/L)*low_cutoff_index.
 const double high_cutoff_index = 0.0;
 const double low_cutoff_index = 0.0;
 
-// Set to 1 to enforce the cutoff continuously, not just at initialization
+// 1: enforce the cutoff continuously during evolution (not only at initialization).
 const int forcing_cutoff = 0;
 
-// -------------------- Output Configuration --------------------
+// -------------------- Output configuration --------------------
 
-// Toggle various outputs (1 = enabled)
+// Toggle individual outputs (1 = enabled, 0 = disabled).
 const int output_spectra = 1;
 const int output_histogram = 1;
 const int output_energy = 1;
@@ -109,22 +147,27 @@ const int output_box2D = 0;
 const int output_bispectrum = 0;
 
 #if perform_deltaN
-const int output_LOG = 0;     // Calculates zeta with the log relation (see documentation)
-const double eta_log = -0.5;  // Value of constant eta assumed in the log formula
+// 1: compute zeta using the log relation (see documentation for assumptions).
+const int output_LOG = 0;
+
+// Constant eta assumed by the log relation.
+const double eta_log = -0.5;
 #endif
 
-// Print time/step info to console
+// 1: print periodic progress updates to stdout.
 const int screen_updates = 1;
 
-// Number of bins used in field histograms
+// Number of bins used for field histograms.
 const int nbins = 256;
 
-// -------------------- Numerical Potential Handling --------------------
+// -------------------- Numerical-potential handling --------------------
 
 #if numerical_potential
-const int int_err = 5;   // Increase if the code gives "interpolation error"
-const int int_errN = 5;  // Same, but for deltaN interpolation
+// Interpolation tolerances for the numerical potential tables.
+// Increase if you encounter interpolation warnings/errors.
+const int int_err = 5;
+const int int_errN = 5;
 #endif
 
-/// Set to 1 to enable OpenMP parallelism in selected loops (if supported by the compiler)
+// 1: enable OpenMP parallelism in selected loops (requires compiler support).
 #define parallel_calculation 1
