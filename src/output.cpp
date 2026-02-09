@@ -52,93 +52,95 @@ void kill_mode(double *field, double *deriv)
 // numbers. The caller supplies the overall normalization.
 
 static void write_isotropic_spectrum_from_fft_r2c(
-FILE *out,
-const std::vector<double> &field_fft,
-const double (*nyquist_plane)[2 * N],
-const double norm1)
+    FILE *out,
+    const std::vector<double> &field_fft,
+    const double (*nyquist_plane)[2 * N],
+    const double norm1)
 {
     const int maxnumbins = (int)(1.73205 * (N / 2)) + 1;
+    const int numbins = maxnumbins;
 
     int numpoints[maxnumbins];
     double p[maxnumbins], f2[maxnumbins];
 
-    const int numbins = maxnumbins;
     const double dp = 2.0 * pi / L;
 
     for (int i = 0; i < numbins; i++)
     {
-        p[i] = i * dp;
-        f2[i] = 0.0;
+        p[i] = dp * i;
         numpoints[i] = 0;
+        f2[i] = 0.0;
     }
 
-    // Main k-space cube excluding the Nyquist plane.
+    // Match legacy binning + multiplicities + indexing exactly.
     for (int i = 0; i < N; i++)
     {
-        const int pz = (i > N / 2) ? i - N : i;
+        const int px = (i <= N / 2 ? i : i - N);
 
         for (int j = 0; j < N; j++)
         {
-            const int py = (j > N / 2) ? j - N : j;
+            const int py = (j <= N / 2 ? j : j - N);
 
-            for (int k = 0; k < N / 2; k++)
+            // Interior modes: 1 <= k < N/2 carry a conjugate partner -> weight 2
+            for (int k = 1; k < N / 2; k++)
             {
-                const int px = k;
+                const int pz = k;
 
-                const double pmagnitude = std::sqrt((double)(px * px + py * py + pz * pz));
+                const double pmagnitude =
+                    std::sqrt(pw2((double)px) + pw2((double)py) + pw2((double)pz));
+
                 const int bin = (int)lround(pmagnitude);
+                if (bin < 0 || bin >= numbins) continue;
 
-                if (bin >= 0 && bin < numbins)
-                {
-                    const size_t ind = idx(i, j, k);
-                    const double re = field_fft[ind];
-                    const double im = field_fft[ind + 1];
+                const double re = field_fft[idx(i, j, 2 * k)];
+                const double im = field_fft[idx(i, j, 2 * k + 1)];
+                const double fp2 = re * re + im * im;
 
-                    f2[bin] += re * re + im * im;
-                    numpoints[bin] += 1;
-                }
+                numpoints[bin] += 2;
+                f2[bin] += 2.0 * fp2;
             }
-        }
-    }
 
-    // Nyquist plane (kx = N/2) stored separately.
-    for (int i = 0; i < N; i++)
-    {
-        const int pz = (i > N / 2) ? i - N : i;
-
-        for (int j = 0; j < N; j++)
-        {
-            const int py = (j > N / 2) ? j - N : j;
-            const int px = N / 2;
-
-            const double pmagnitude = std::sqrt((double)(px * px + py * py + pz * pz));
-            const int bin = (int)lround(pmagnitude);
-
-            if (bin >= 0 && bin < numbins)
+            // Special cases: k = 0 and k = N/2 (Nyquist plane stored separately for k=N/2)
+            for (int k = 0; k <= N / 2; k += N / 2)
             {
-                const double re = nyquist_plane[i][2 * j];
-                const double im = nyquist_plane[i][2 * j + 1];
+                const int pz = k;
 
-                f2[bin] += re * re + im * im;
+                const double pmagnitude =
+                    std::sqrt(pw2((double)px) + pw2((double)py) + pw2((double)pz));
+
+                const int bin = (int)lround(pmagnitude);
+                if (bin < 0 || bin >= numbins) continue;
+
+                double fp2 = 0.0;
+                if (k == 0)
+                {
+                    const double re = field_fft[idx(i, j, 0)];
+                    const double im = field_fft[idx(i, j, 1)];
+                    fp2 = re * re + im * im;
+                }
+                else
+                {
+                    const double re = nyquist_plane[i][2 * j];
+                    const double im = nyquist_plane[i][2 * j + 1];
+                    fp2 = re * re + im * im;
+                }
+
                 numpoints[bin] += 1;
+                f2[bin] += fp2;
             }
         }
     }
 
-    // Normalized, binned spectrum.
     for (int i = 0; i < numbins; i++)
     {
-        if (numpoints[i] > 0)
-        f2[i] /= (double)numpoints[i];
-        else
-        f2[i] = 0.0;
-
+        if (numpoints[i] > 0) f2[i] /= (double)numpoints[i];
         std::fprintf(out, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
     }
 
     std::fprintf(out, "\n");
     std::fflush(out);
 }
+
 
 // Construct δN (linear mapping) in-place in deltaN.
 static void build_deltaN_linear()
@@ -390,7 +392,6 @@ void spectraf()
 
 
 #if calculate_SIGW
-// ------------------------- P_h(k) with Λ–contraction -------------------------
 
 //=============================================================================
 // Gravitational-wave spectra (transverse-traceless projection)
@@ -398,7 +399,7 @@ void spectraf()
 
 namespace {
 
-    // Open a rank-dependent output file once, using the global {name_, ext_, mode_} convention.
+    // Open an output file the first time this routine is called.
     static inline void open_output_once(FILE *&fp, int &first, const char *relative_path)
     {
         if (!first) return;
@@ -407,23 +408,22 @@ namespace {
         first = 0;
     }
 
-    // How the time-derivative tensor modes are converted to physical units before projecting.
+    // Conversion of tensor time-derivative modes to physical units before projection.
     enum class GwScaleMode {
-        None,             // no additional scaling
-        DoubleThenFloat,  // (float)((double)x * to_phys) for exact legacy rounding
-        FloatMultiply     // x * (float)to_phys
-    } ;
+        None,
+        DoubleThenFloat,
+        FloatMultiply
+    };
 
-    // Read a single complex tensor component from either the interior r2c buffer or the Nyquist plane.
     static inline void load_tensor_component(
-    const std::vector<float> &buf,
-    const float (*nyq)[2 * N],
-    const bool on_nyquist_plane,
-    const int i, const int j2,
-    const size_t idx_mode,
-    const GwScaleMode scale_mode,
-    const double to_phys,
-    float &re, float &im)
+        const std::vector<float> &buf,
+        const float (*nyq)[2 * N],
+        const bool on_nyquist_plane,
+        const int i, const int j2,
+        const size_t idx_mode,
+        const GwScaleMode scale_mode,
+        const double to_phys,
+        float &re, float &im)
     {
         if (!on_nyquist_plane) {
             re = buf[idx_mode];
@@ -445,34 +445,32 @@ namespace {
         }
     }
 
-    // Core GW spectrum writer shared by GW / GWdot and inflation / post-inflation variants.
-    // This is a direct factorization of the legacy implementation: loop structure and arithmetic are preserved.
+    // Isotropically binned TT-projected spectrum from hij/hijd in real-space storage.
+    // Output columns: k_phys, nmodes, spectrum.
     static void write_gw_spectrum_impl(
-    FILE *out,
-    std::vector<float> (&h)[6],
-    float (*hnyq)[N][2 * N],
-    const GwScaleMode scale_mode,
-    const double to_phys)
+        FILE *out,
+        std::vector<float> (&h)[6],
+        float (*hnyq)[N][2 * N],
+        const GwScaleMode scale_mode,
+        const double to_phys)
     {
         const int   numbins   = (int)(std::sqrt(3.0) * (N/2)) + 1;
-        const int   i_max_out = (int)std::floor(0.80 * numbins);   // keep up to 80% of Nyquist
+        const int   i_max_out = (int)std::floor(0.80 * numbins);
         const float dp        = 2.f * (float)pi / (float)L;
 
         std::vector<int>   numpoints(numbins, 0);
         std::vector<float> p(numbins, 0.f), f2(numbins, 0.f);
         for (int i = 0; i < numbins; ++i) p[i] = dp * i;
 
-        // --- FFT to k-space (Nyquist planes in scratch) ---
         int arraysize[] = {N, N, N};
         for (int c = 0; c < 6; ++c) fftrnf(h[c].data(), (float*)hnyq[c], 3, arraysize, 1);
 
-        // --- loop over modes ---
         for (int i = 0; i < N; ++i) {
             int px = (i <= N/2 ? i : i - N);
             for (int j = 0; j < N; ++j) {
                 int py = (j <= N/2 ? j : j - N);
 
-                // interior (double-counted)
+                // Interior r2c modes: 1 <= k < N/2 (count conjugate partner with weight 2).
                 for (int k = 1; k < N/2; ++k) {
                     int pz = k;
 
@@ -486,6 +484,7 @@ namespace {
                     if (bin >= i_max_out) continue;
 
                     size_t idx_mode = idx(i, j, 2*k);
+
                     float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
                     for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
                         int comp = sym_idx(l, m);
@@ -497,30 +496,33 @@ namespace {
 
                     float inv = 1.0f / std::sqrt(kt2);
                     float kh[3] = {kx*inv, ky*inv, kz*inv};
+
                     float P[3][3];
-                    for (int a=0;a<3;++a) for (int b=0;b<3;++b)
-                    P[a][b] = (a==b?1.f:0.f) - kh[a]*kh[b];
+                    for (int a = 0; a < 3; ++a) for (int b = 0; b < 3; ++b)
+                        P[a][b] = (a == b ? 1.f : 0.f) - kh[a]*kh[b];
 
                     float A_re[3][3] = {{0}}, A_im[3][3] = {{0}};
                     float T_re = 0.f, T_im = 0.f;
-                    for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
-                        float r=0.f, im=0.f;
-                        for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
+
+                    for (int a = 0; a < 3; ++a) for (int b = 0; b < 3; ++b) {
+                        float r = 0.f, im = 0.f;
+                        for (int l = 0; l < 3; ++l) for (int m = 0; m < 3; ++m) {
                             float pal = P[a][l], pbm = P[b][m];
                             r  += pal * C_re[l][m] * pbm;
                             im += pal * C_im[l][m] * pbm;
                         }
-                        A_re[a][b]=r; A_im[a][b]=im;
+                        A_re[a][b] = r; A_im[a][b] = im;
                     }
-                    for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
-                        T_re += P[l][m]*C_re[l][m];
-                        T_im += P[l][m]*C_im[l][m];
+
+                    for (int l = 0; l < 3; ++l) for (int m = 0; m < 3; ++m) {
+                        T_re += P[l][m] * C_re[l][m];
+                        T_im += P[l][m] * C_im[l][m];
                     }
 
                     float fp2 = 0.f;
-                    for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
-                        float Xr = A_re[a][b] - 0.5f*P[a][b]*T_re;
-                        float Xi = A_im[a][b] - 0.5f*P[a][b]*T_im;
+                    for (int a = 0; a < 3; ++a) for (int b = 0; b < 3; ++b) {
+                        float Xr = A_re[a][b] - 0.5f * P[a][b] * T_re;
+                        float Xi = A_im[a][b] - 0.5f * P[a][b] * T_im;
                         fp2 += Xr*Xr + Xi*Xi;
                     }
 
@@ -528,10 +530,10 @@ namespace {
                     f2[bin] += 2.f * fp2;
                 }
 
-                // Nyquist plane: k = 0 and k = N/2
+                // Special modes: k = 0 and k = N/2 (Nyquist plane). Use pz = +N/2 for k = N/2.
                 for (int kk = 0; kk <= 1; ++kk) {
-                    int k = kk*(N/2);
-                    int pz = (k==0 ? 0 : -N/2);
+                    int k  = kk * (N/2);
+                    int pz = k;
 
                     float kx = (2.f/(float)dx) * std::sin((float)pi * px / (float)N);
                     float ky = (2.f/(float)dx) * std::sin((float)pi * py / (float)N);
@@ -543,41 +545,49 @@ namespace {
                     if (bin >= i_max_out) continue;
 
                     const int j2 = 2*j;
+
                     float C_re[3][3] = {{0}}, C_im[3][3] = {{0}};
                     for (int l = 0; l < 3; ++l) for (int m = l; m < 3; ++m) {
                         int comp = sym_idx(l, m);
                         float re, im;
-                        load_tensor_component(h[comp], hnyq[comp], true, i, j2, 0, scale_mode, to_phys, re, im);
+                        if (k == 0) {
+                            load_tensor_component(h[comp], hnyq[comp], false, 0, 0, idx(i, j, 0), scale_mode, to_phys, re, im);
+                        } else {
+                            load_tensor_component(h[comp], hnyq[comp], true, i, j2, 0, scale_mode, to_phys, re, im);
+                        }
                         C_re[l][m] = re; C_im[l][m] = im;
                         if (m != l) { C_re[m][l] = re; C_im[m][l] = im; }
                     }
 
                     float inv = 1.0f / std::sqrt(kt2);
                     float kh[3] = {kx*inv, ky*inv, kz*inv};
+
                     float P[3][3];
-                    for (int a=0;a<3;++a) for (int b=0;b<3;++b)
-                    P[a][b] = (a==b?1.f:0.f) - kh[a]*kh[b];
+                    for (int a = 0; a < 3; ++a) for (int b = 0; b < 3; ++b)
+                        P[a][b] = (a == b ? 1.f : 0.f) - kh[a]*kh[b];
 
                     float A_re[3][3] = {{0}}, A_im[3][3] = {{0}};
                     float T_re = 0.f, T_im = 0.f;
-                    for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
-                        float r=0.f, im=0.f;
-                        for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
+
+                    for (int a = 0; a < 3; ++a) for (int b = 0; b < 3; ++b) {
+                        float r = 0.f, im = 0.f;
+                        for (int l = 0; l < 3; ++l) for (int m = 0; m < 3; ++m) {
                             float pal = P[a][l], pbm = P[b][m];
                             r  += pal * C_re[l][m] * pbm;
                             im += pal * C_im[l][m] * pbm;
                         }
-                        A_re[a][b]=r; A_im[a][b]=im;
+                        A_re[a][b] = r; A_im[a][b] = im;
                     }
-                    for (int l=0;l<3;++l) for (int m=0;m<3;++m) {
-                        T_re += P[l][m]*C_re[l][m];
-                        T_im += P[l][m]*C_im[l][m];
+
+                    for (int l = 0; l < 3; ++l) for (int m = 0; m < 3; ++m) {
+                        T_re += P[l][m] * C_re[l][m];
+                        T_im += P[l][m] * C_im[l][m];
                     }
 
                     float fp2 = 0.f;
-                    for (int a=0;a<3;++a) for (int b=0;b<3;++b) {
-                        float Xr = A_re[a][b] - 0.5f*P[a][b]*T_re;
-                        float Xi = A_im[a][b] - 0.5f*P[a][b]*T_im;
+                    for (int a = 0; a < 3; ++a) for (int b = 0; b < 3; ++b) {
+                        float Xr = A_re[a][b] - 0.5f * P[a][b] * T_re;
+                        float Xi = A_im[a][b] - 0.5f * P[a][b] * T_im;
                         fp2 += Xr*Xr + Xi*Xi;
                     }
 
@@ -587,10 +597,8 @@ namespace {
             }
         }
 
-        // --- back-transform (restore real-space buffers for continued evolution) ---
         for (int c = 0; c < 6; ++c) fftrnf(h[c].data(), (float*)hnyq[c], 3, arraysize, -1);
 
-        // --- output: match legacy file format (k_phys, nmodes, spectrum) ---
         const float norm1 = 0.5f * std::pow(L / rescale_B, 3) / std::pow((float)N, 6);
         for (int i = 0; i < numbins; ++i) {
             if (numpoints[i] > 0) f2[i] /= (float)numpoints[i];
@@ -602,6 +610,8 @@ namespace {
 
 } // anonymous namespace
 
+
+// Gravitational-wave tensor spectrum.
 void spectraGW()
 {
     static FILE *fp = nullptr;
@@ -611,7 +621,7 @@ void spectraGW()
 }
 
 
-// --------------- a^4 P_{\dot h}(k) with Λ–contraction ---------------------
+// a^4 P_{hdot}(k) spectrum, stored in physical units.
 void spectraGWdot()
 {
     static FILE *fp = nullptr;
@@ -621,6 +631,26 @@ void spectraGWdot()
     write_gw_spectrum_impl(fp, hijd, hijdnyquist_p, GwScaleMode::DoubleThenFloat, to_phys);
 }
 
+
+// Gravitational-wave tensor spectrum (post-inflation).
+void spectraGW_post_inflation()
+{
+    static FILE *fp = nullptr;
+    static int first = 1;
+    open_output_once(fp, first, "results/post_inflation/spectraGW");
+    write_gw_spectrum_impl(fp, hij, hijnyquist_p, GwScaleMode::None, 1.0);
+}
+
+
+// a^4 P_{hdot}(k) spectrum (post-inflation), stored in physical units.
+void spectraGWdot_post_inflation()
+{
+    static FILE *fp = nullptr;
+    static int first = 1;
+    open_output_once(fp, first, "results/post_inflation/spectraGWdot");
+    const float to_phys = rescale_B * pow(a, rescale_s - 1.f);
+    write_gw_spectrum_impl(fp, hijd, hijdnyquist_p, GwScaleMode::FloatMultiply, (double)to_phys);
+}
 
 #endif
 
@@ -1684,33 +1714,6 @@ void spectraf_post_inflation()
     fftrnd(f.data(), (double *)fnyquist_p, 3, arraysize, -1);
 
 }
-
-
-
-#if calculate_SIGW
-
-// ------------------------- P_h(k) with Λ–contraction -------------------------
-void spectraGW_post_inflation()
-{
-    static FILE *fp = nullptr;
-    static int first = 1;
-    open_output_once(fp, first, "results/post_inflation/spectraGW");
-    write_gw_spectrum_impl(fp, hij, hijnyquist_p, GwScaleMode::None, 1.0);
-}
-
-
-// --------------- a^4 P_{\dot h}(k) with Λ–contraction ---------------------
-void spectraGWdot_post_inflation()
-{
-    static FILE *fp = nullptr;
-    static int first = 1;
-    open_output_once(fp, first, "results/post_inflation/spectraGWdot");
-    const float to_phys = rescale_B * pow(a, rescale_s - 1.f);
-    write_gw_spectrum_impl(fp, hijd, hijdnyquist_p, GwScaleMode::FloatMultiply, (double)to_phys);
-}
-
-
-#endif
 
 void histograms_post_inflation()
 {
