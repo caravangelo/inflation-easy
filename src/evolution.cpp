@@ -325,9 +325,7 @@ double get_phiref() {
     DECLARE_INDICES
     double fref = f[idx(0,0,0)];
 
-#if parallel_calculation
-#pragma omp parallel for collapse(3)
-#endif
+    // Keep this reduction deterministic: fref selection depends on ordering.
     LOOP {
 #if monotonic_potential
         if (std::abs(f[idx(i,j,k)]) < std::abs(fref))

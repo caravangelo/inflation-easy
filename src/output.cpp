@@ -12,6 +12,15 @@ using namespace std::filesystem;
 
 char name_[550]; // Filenames - set differently by each function to open output files
 
+static FILE* open_output_or_die(const char* path, const char* mode) {
+    FILE* fp = std::fopen(path, mode);
+    if (!fp) {
+        std::fprintf(stderr, "Failed to open output file: %s\n", path);
+        std::exit(1);
+    }
+    return fp;
+}
+
 // Zeroes out a mode and its derivative (used when applying a cutoff)
 void kill_mode(double *field, double *deriv)
 {
@@ -170,6 +179,11 @@ static void build_deltaN_log()
     factt /= (double)gridsize;
     fmean /= (double)gridsize;
 
+    if (!std::isfinite(factt) || std::abs(factt) < 1e-30) {
+        LOOP deltaN[idx(i, j, k)] = 0.0;
+        return;
+    }
+
     LOOP
     {
         deltaN[idx(i, j, k)] = 0.0;
@@ -196,11 +210,11 @@ void meansvars(int flush)
     if (first) // Open output files
     {
         snprintf(name_, sizeof(name_), "results/means%s", ext_);
-        means_ = fopen(name_, mode_);
+        means_ = open_output_or_die(name_, mode_);
         snprintf(name_, sizeof(name_), "results/variance%s", ext_);
-        vars_ = fopen(name_, mode_);
+        vars_ = open_output_or_die(name_, mode_);
         snprintf(name_, sizeof(name_), "results/velocity%s", ext_);
-        velocity_ = fopen(name_, mode_);
+        velocity_ = open_output_or_die(name_, mode_);
         first = 0;
     }
 
@@ -261,7 +275,7 @@ void scale(int flush)
     if (first) // Open output file
     {
         snprintf(name_, sizeof(name_), "results/sf%s", ext_);
-        sf_ = fopen(name_, mode_);
+        sf_ = open_output_or_die(name_, mode_);
         first = 0;
     }
 
@@ -286,10 +300,10 @@ void spectraf()
     if (first)
     {
         std::snprintf(name_, sizeof(name_), "results/spectra%s", ext_);
-        spectra_ = std::fopen(name_, mode_);
+        spectra_ = open_output_or_die(name_, mode_);
 
         std::snprintf(name_, sizeof(name_), "results/spectratimes%s", ext_);
-        spectratimes_ = std::fopen(name_, mode_);
+        spectratimes_ = open_output_or_die(name_, mode_);
 
         first = 0;
     }
@@ -404,7 +418,7 @@ namespace {
     {
         if (!first) return;
         std::snprintf(name_, sizeof(name_), "%s%s", relative_path, ext_);
-        fp = std::fopen(name_, mode_);
+        fp = open_output_or_die(name_, mode_);
         first = 0;
     }
 
@@ -670,7 +684,7 @@ void get_modes()
     if(first) // Open output files
     {
         snprintf(name_, sizeof(name_), "results/modes%s",ext_);
-        modes_=fopen(name_,mode_);
+        modes_=open_output_or_die(name_, mode_);
         first=0;
     }
 
@@ -754,7 +768,7 @@ void bispectraf()
     if(first) // Open output files
     {
         snprintf(name_, sizeof(name_), "results/bispectra%s",ext_);
-        bispectra_=fopen(name_,mode_);
+        bispectra_=open_output_or_die(name_, mode_);
         first=0;
     }
 
@@ -902,7 +916,7 @@ void box()
     if(first) // Open output files
     {
         snprintf(name_, sizeof(name_), "results/box%s",ext_);
-        box_ = fopen(name_,mode_);
+        box_ = open_output_or_die(name_, mode_);
         first=0;
     }
 
@@ -927,7 +941,7 @@ void box2d()
     if(first) // Open output files
     {
         snprintf(name_, sizeof(name_), "results/snapshots_2d_phi%s",ext_);
-        snapshots_2d_phi_ = fopen(name_,mode_);
+        snapshots_2d_phi_ = open_output_or_die(name_, mode_);
         first=0;
     }
 
@@ -952,7 +966,7 @@ void box2dot()
     if(first) // Open output files
     {
         snprintf(name_, sizeof(name_), "results/snapshots_2d_phidot%s",ext_);
-        snapshots_2d_phidot_ = fopen(name_,mode_);
+        snapshots_2d_phidot_ = open_output_or_die(name_, mode_);
         first=0;
     }
 
@@ -974,10 +988,10 @@ void energy()
     if (first) // Open output files
     {
         snprintf(name_, sizeof(name_), "results/energy%s", ext_);
-        energy_ = fopen(name_, mode_);
+        energy_ = open_output_or_die(name_, mode_);
 
         snprintf(name_, sizeof(name_), "results/conservation%s", ext_);
-        conservation_ = fopen(name_, mode_);
+        conservation_ = open_output_or_die(name_, mode_);
 
         first = 0;
     }
@@ -1063,10 +1077,10 @@ void histograms()
     if (first) // Open output files
     {
         snprintf(name_, sizeof(name_), "results/histogram%s", ext_);
-        histogram_ = fopen(name_, mode_);
+        histogram_ = open_output_or_die(name_, mode_);
 
         snprintf(name_, sizeof(name_), "results/histogramtimes%s", ext_);
-        histogramtimes_ = fopen(name_, mode_);
+        histogramtimes_ = open_output_or_die(name_, mode_);
         first = 0;
     }
 
@@ -1086,6 +1100,7 @@ void histograms()
 
     // Find the difference (in field value) between successive bins
     df = (bmax - bmin) / (double)(nbins); // bmin will be at the bottom of the first bin and bmax at the top of the last
+    if (!std::isfinite(df) || df <= 0.0) df = 1.0;
 
     // Initialize all frequencies to zero
     for (i = 0; i < nbins; i++)
@@ -1106,6 +1121,7 @@ void histograms()
     } // End of loop over grid
 
     // Output results
+    if (numpts == 0) numpts = 1;
     for (i = 0; i < nbins; i++)
     fprintf(histogram_, "%e\n", binfreq[i] / (double)numpts); // Output bin frequency
     fprintf(histogram_, "\n"); // Stick a blank line between times to make the file more readable
@@ -1127,7 +1143,7 @@ void spectraN()
     if (first)
     {
         std::snprintf(name_, sizeof(name_), "results/spectraN%s", ext_);
-        spectraN_ = std::fopen(name_, mode_);
+        spectraN_ = open_output_or_die(name_, mode_);
         first = 0;
     }
 
@@ -1160,7 +1176,7 @@ void boxN()
     if (first) // Open output file
     {
         snprintf(name_, sizeof(name_), "results/boxN%s", ext_);
-        boxN_ = fopen(name_, mode_);
+        boxN_ = open_output_or_die(name_, mode_);
         first = 0;
     }
 
@@ -1186,7 +1202,7 @@ void box2dN()
     if (first) // Open output file
     {
         snprintf(name_, sizeof(name_), "results/snapshots_2d_deltaN%s", ext_);
-        snapshots_2d_deltaN_ = fopen(name_, mode_);
+        snapshots_2d_deltaN_ = open_output_or_die(name_, mode_);
         first = 0;
     }
 
@@ -1212,10 +1228,10 @@ void histogramsN()
     if (first)
     {
         snprintf(name_, sizeof(name_), "results/histogramN%s", ext_);
-        histogramN_ = fopen(name_, mode_);
+        histogramN_ = open_output_or_die(name_, mode_);
 
         snprintf(name_, sizeof(name_), "results/histogramtimesN%s", ext_);
-        histogramtimesN_ = fopen(name_, mode_);
+        histogramtimesN_ = open_output_or_die(name_, mode_);
         first = 0;
     }
 
@@ -1230,6 +1246,7 @@ void histogramsN()
     }
 
     df = (bmax - bmin) / (double)(nbins);
+    if (!std::isfinite(df) || df <= 0.0) df = 1.0;
 
     for (i = 0; i < nbins; i++)
     binfreq[i] = 0.;
@@ -1247,6 +1264,7 @@ void histogramsN()
         }
     }
 
+    if (numpts == 0) numpts = 1;
     for (i = 0; i < nbins; i++)
     fprintf(histogramN_, "%e\n", binfreq[i] / (double)numpts);
     fprintf(histogramN_, "\n");
@@ -1265,7 +1283,7 @@ void spectraLOG()
     if (first)
     {
         std::snprintf(name_, sizeof(name_), "results/spectraLOG%s", ext_);
-        spectraLOG_ = std::fopen(name_, mode_);
+        spectraLOG_ = open_output_or_die(name_, mode_);
         first = 0;
     }
 
@@ -1302,10 +1320,10 @@ void histogramsLOG()
     if (first)
     {
         snprintf(name_, sizeof(name_), "results/histogramLOG%s", ext_);
-        histogramLOG_ = fopen(name_, mode_);
+        histogramLOG_ = open_output_or_die(name_, mode_);
 
         snprintf(name_, sizeof(name_), "results/histogramtimesLOG%s", ext_);
-        histogramtimesLOG_ = fopen(name_, mode_);
+        histogramtimesLOG_ = open_output_or_die(name_, mode_);
         first = 0;
     }
 
@@ -1322,6 +1340,15 @@ void histogramsLOG()
 
     factt = factt / (double)gridsize;
     fmean = fmean / (double)gridsize;
+
+    if (!std::isfinite(factt) || std::abs(factt) < 1e-30) {
+        for (i = 0; i < nbins; i++) fprintf(histogramLOG_, "%e\n", 0.0);
+        fprintf(histogramLOG_, "\n");
+        fflush(histogramLOG_);
+        fprintf(histogramtimesLOG_, " %e %e\n", 0.0, 1.0);
+        fflush(histogramtimesLOG_);
+        return;
+    }
 
     LOOP
     {
@@ -1342,6 +1369,7 @@ void histogramsLOG()
     }
 
     df = (bmax - bmin) / (double)(nbins);
+    if (!std::isfinite(df) || df <= 0.0) df = 1.0;
 
     for (i = 0; i < nbins; i++)
     binfreq[i] = 0.;
@@ -1362,6 +1390,7 @@ void histogramsLOG()
         }
     }
 
+    if (numpts == 0) numpts = 1;
     for (i = 0; i < nbins; i++)
     fprintf(histogramLOG_, "%e\n", binfreq[i] / (double)numpts);
     fprintf(histogramLOG_, "\n");
@@ -1384,7 +1413,7 @@ void output_parameters()
     if (first) // At beginning of run output run parameters
     {
         snprintf(name_, sizeof(name_), "results/info%s", ext_);
-        info_ = fopen(name_, mode_);
+        info_ = open_output_or_die(name_, mode_);
 
         fprintf(info_, "--------------------------\n");
         fprintf(info_, "General Program Information\n");
@@ -1530,11 +1559,11 @@ void meansvars_post_inflation(int flush)
     if (first) // Open output files
     {
         snprintf(name_, sizeof(name_), "results/post_inflation/means%s", ext_);
-        means_ = fopen(name_, mode_);
+        means_ = open_output_or_die(name_, mode_);
         snprintf(name_, sizeof(name_), "results/post_inflation/variance%s", ext_);
-        vars_ = fopen(name_, mode_);
+        vars_ = open_output_or_die(name_, mode_);
         snprintf(name_, sizeof(name_), "results/post_inflation/velocity%s", ext_);
-        velocity_ = fopen(name_, mode_);
+        velocity_ = open_output_or_die(name_, mode_);
         first = 0;
     }
 
@@ -1593,7 +1622,7 @@ void scale_post_inflation(int flush)
     if (first) // Open output file
     {
         snprintf(name_, sizeof(name_), "results/post_inflation/sf%s", ext_);
-        sf_ = fopen(name_, mode_);
+        sf_ = open_output_or_die(name_, mode_);
         first = 0;
     }
 
@@ -1618,10 +1647,10 @@ void spectraf_post_inflation()
     if (first)
     {
         std::snprintf(name_, sizeof(name_), "results/post_inflation/spectra%s", ext_);
-        spectra_ = std::fopen(name_, mode_);
+        spectra_ = open_output_or_die(name_, mode_);
 
         std::snprintf(name_, sizeof(name_), "results/post_inflation/spectratimes%s", ext_);
-        spectratimes_ = std::fopen(name_, mode_);
+        spectratimes_ = open_output_or_die(name_, mode_);
 
         first = 0;
     }
@@ -1728,10 +1757,10 @@ void histograms_post_inflation()
     if (first) // Open output files
     {
         snprintf(name_, sizeof(name_), "results/post_inflation/histogram%s", ext_);
-        histogram_ = fopen(name_, mode_);
+        histogram_ = open_output_or_die(name_, mode_);
 
         snprintf(name_, sizeof(name_), "results/post_inflation/histogramtimes%s", ext_);
-        histogramtimes_ = fopen(name_, mode_);
+        histogramtimes_ = open_output_or_die(name_, mode_);
         first = 0;
     }
 
@@ -1751,6 +1780,7 @@ void histograms_post_inflation()
 
     // Find the difference (in field value) between successive bins
     df = (bmax - bmin) / (double)(nbins); // bmin will be at the bottom of the first bin and bmax at the top of the last
+    if (!std::isfinite(df) || df <= 0.0) df = 1.0;
 
     // Initialize all frequencies to zero
     for (i = 0; i < nbins; i++)
@@ -1771,6 +1801,7 @@ void histograms_post_inflation()
     } // End of loop over grid
 
     // Output results
+    if (numpts == 0) numpts = 1;
     for (i = 0; i < nbins; i++)
     fprintf(histogram_, "%e\n", binfreq[i] / (double)numpts); // Output bin frequency normalized so the total equals 1
     fprintf(histogram_, "\n"); // Stick a blank line between times to make the file more readable

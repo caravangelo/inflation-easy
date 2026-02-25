@@ -1,0 +1,193 @@
+
+\providecommand{\href}[2]{#2}\begingroup\raggedright\begin{thebibliography}{10}
+
+\bibitem{latticeeasy}
+G.~Felder and I.~Tkachev, \emph{Latticeeasy: A program for lattice simulations
+  of scalar fields in an expanding universe},
+  \href{https://doi.org/10.1016/j.cpc.2008.02.009}{\emph{Computer Physics
+  Communications} {\bfseries 178} (2008) 929?932}.
+
+\bibitem{Frolov_2008}
+A.V.~Frolov, \emph{Defrost: a new code for simulating preheating after
+  inflation},
+  \href{https://doi.org/10.1088/1475-7516/2008/11/009}{\emph{Journal of
+  Cosmology and Astroparticle Physics} {\bfseries 2008} (2008) 009}.
+
+\bibitem{Easther_2010}
+R.~Easther, H.~Finkel and N.~Roth, \emph{Pspectre: a pseudo-spectral code for
+  (p)reheating},
+  \href{https://doi.org/10.1088/1475-7516/2010/10/025}{\emph{Journal of
+  Cosmology and Astroparticle Physics} {\bfseries 2010} (2010) 025–025}.
+
+\bibitem{hlattice}
+Z.~Huang, \emph{Art of lattice and gravity waves from preheating},
+  \href{https://doi.org/10.1103/physrevd.83.123509}{\emph{Physical Review D}
+  {\bfseries 83} (2011) }.
+
+\bibitem{Sainio_2012}
+J.~Sainio, \emph{Pycool — a cosmological object-oriented lattice code written
+  in python},
+  \href{https://doi.org/10.1088/1475-7516/2012/04/038}{\emph{Journal of
+  Cosmology and Astroparticle Physics} {\bfseries 2012} (2012) 038–038}.
+
+\bibitem{Lozanov_2020}
+K.D.~Lozanov and M.A.~Amin, \emph{Gfire—gauge field integrator for
+  reheating},
+  \href{https://doi.org/10.1088/1475-7516/2020/04/058}{\emph{Journal of
+  Cosmology and Astroparticle Physics} {\bfseries 2020} (2020) 058–058}.
+
+\bibitem{figueroa2021cosmolattice}
+D.G.~Figueroa, A.~Florio, F.~Torrenti and W.~Valkenburg, \emph{{CosmoLattice}},
+   \href{https://arxiv.org/abs/2102.01031}{{\ttfamily 2102.01031}}.
+
+\bibitem{Mizuguchi:2024kbl}
+Y.~Mizuguchi, T.~Murata and Y.~Tada, \emph{{STOLAS: STOchastic LAttice
+  Simulation of cosmic inflation}},
+  \href{https://doi.org/10.1088/1475-7516/2024/12/050}{\emph{JCAP} {\bfseries
+  12} (2024) 050} [\href{https://arxiv.org/abs/2405.10692}{{\ttfamily
+  2405.10692}}].
+
+\bibitem{Caravano:2021pgc}
+A.~Caravano, E.~Komatsu, K.D.~Lozanov and J.~Weller, \emph{{Lattice simulations
+  of inflation}},
+  \href{https://doi.org/10.1088/1475-7516/2021/12/010}{\emph{JCAP} {\bfseries
+  12} (2021) 010} [\href{https://arxiv.org/abs/2102.06378}{{\ttfamily
+  2102.06378}}].
+
+\bibitem{Caravano:2022yyv}
+A.~Caravano, \emph{{Simulating the inflationary Universe: from single-field to
+  the axion-U(1) model}}, Ph.D. thesis, Munich U., 7, 2022.
+\newblock \href{https://arxiv.org/abs/2209.13616}{{\ttfamily 2209.13616}}.
+\newblock 10.5282/edoc.30905.
+
+\bibitem{Caravano:2024tlp}
+A.~Caravano, K.~Inomata and S.~Renaux-Petel, \emph{{The Inflationary Butterfly
+  Effect: Non-Perturbative Dynamics From Small-Scale Features}},
+  \href{https://arxiv.org/abs/2403.12811}{{\ttfamily 2403.12811}}.
+
+\bibitem{Caravano:2024moy}
+A.~Caravano, G.~Franciolini and S.~Renaux-Petel, \emph{{Ultraslow-roll
+  inflation on the lattice: Backreaction and nonlinear effects}},
+  \href{https://doi.org/10.1103/PhysRevD.111.063518}{\emph{Phys. Rev. D}
+  {\bfseries 111} (2025) 063518}
+  [\href{https://arxiv.org/abs/2410.23942}{{\ttfamily 2410.23942}}].
+
+\bibitem{Caravano:2025diq}
+A.~Caravano, G.~Franciolini and S.~Renaux-Petel, \emph{{Ultraslow-roll
+  inflation on the lattice. II. Nonperturbative curvature perturbation}},
+  \href{https://doi.org/10.1103/39qd-gdfm}{\emph{Phys. Rev. D} {\bfseries 112}
+  (2025) 083508} [\href{https://arxiv.org/abs/2506.11795}{{\ttfamily
+  2506.11795}}].
+
+\bibitem{gwpaper}
+A.~Caravano, G.~Franciolini, S.~Renaux-Petel and A.~Riotto, \emph{{Lattice
+  simulations of scalar-induced gravitational waves from inflation (in
+  preparation)}}, .
+
+\bibitem{Launay:2025kef}
+Y.L.~Launay, G.I.~Rigopoulos and E.P.S.~Shellard, \emph{{Bunch-Davies initial
+  conditions and non-perturbative inflationary dynamics in Numerical
+  Relativity}},  \href{https://arxiv.org/abs/2502.06783}{{\ttfamily
+  2502.06783}}.
+
+\bibitem{Caravano:2024xsb}
+A.~Caravano and M.~Peloso, \emph{{Unveiling the nonlinear dynamics of a rolling
+  axion during inflation}},
+  \href{https://doi.org/10.1088/1475-7516/2025/01/104}{\emph{JCAP} {\bfseries
+  01} (2025) 104} [\href{https://arxiv.org/abs/2407.13405}{{\ttfamily
+  2407.13405}}].
+
+\bibitem{Jamieson:2025ngu}
+D.~Jamieson, A.~Caravano and E.~Komatsu, \emph{{Primordial power spectrum and
+  bispectrum from lattice simulations of axion-U(1) inflation}},
+  \href{https://doi.org/10.1103/3zml-71jd}{\emph{Phys. Rev. D} {\bfseries 112}
+  (2025) 103531} [\href{https://arxiv.org/abs/2507.22285}{{\ttfamily
+  2507.22285}}].
+
+\bibitem{Caravano:2021bfn}
+A.~Caravano, E.~Komatsu, K.D.~Lozanov and J.~Weller, \emph{{Lattice simulations
+  of Abelian gauge fields coupled to axions during inflation}},
+  \href{https://doi.org/10.1103/PhysRevD.105.123530}{\emph{Phys. Rev. D}
+  {\bfseries 105} (2022) 123530}
+  [\href{https://arxiv.org/abs/2110.10695}{{\ttfamily 2110.10695}}].
+
+\bibitem{Caravano:2022epk}
+A.~Caravano, E.~Komatsu, K.D.~Lozanov and J.~Weller, \emph{{Lattice simulations
+  of axion-U(1) inflation}},
+  \href{https://doi.org/10.1103/PhysRevD.108.043504}{\emph{Phys. Rev. D}
+  {\bfseries 108} (2023) 043504}
+  [\href{https://arxiv.org/abs/2204.12874}{{\ttfamily 2204.12874}}].
+
+\bibitem{press1986numerical}
+W.H.~Press, W.T.~Vetterling, S.A.~Teukolsky and B.P.~Flannery, \emph{Numerical
+  recipes}, vol.~818, Cambridge university press Cambridge (1986).
+
+\bibitem{Pi:2022ysn}
+S.~Pi and M.~Sasaki, \emph{{Logarithmic Duality of the Curvature
+  Perturbation}},
+  \href{https://doi.org/10.1103/PhysRevLett.131.011002}{\emph{Phys. Rev. Lett.}
+  {\bfseries 131} (2023) 011002}
+  [\href{https://arxiv.org/abs/2211.13932}{{\ttfamily 2211.13932}}].
+
+\bibitem{Boubekeur:2005zm}
+L.~Boubekeur and D.H.~Lyth, \emph{{Hilltop inflation}},
+  \href{https://doi.org/10.1088/1475-7516/2005/07/010}{\emph{JCAP} {\bfseries
+  07} (2005) 010} [\href{https://arxiv.org/abs/hep-ph/0502047}{{\ttfamily
+  hep-ph/0502047}}].
+
+\bibitem{Tomita:1975kj}
+K.~Tomita, \emph{{Evolution of Irregularities in a Chaotic Early Universe}},
+  \href{https://doi.org/10.1143/PTP.54.730}{\emph{Prog. Theor. Phys.}
+  {\bfseries 54} (1975) 730}.
+
+\bibitem{Matarrese:1993zf}
+S.~Matarrese, O.~Pantano and D.~Saez, \emph{{General relativistic dynamics of
+  irrotational dust: Cosmological implications}},
+  \href{https://doi.org/10.1103/PhysRevLett.72.320}{\emph{Phys. Rev. Lett.}
+  {\bfseries 72} (1994) 320}
+  [\href{https://arxiv.org/abs/astro-ph/9310036}{{\ttfamily
+  astro-ph/9310036}}].
+
+\bibitem{Acquaviva:2002ud}
+V.~Acquaviva, N.~Bartolo, S.~Matarrese and A.~Riotto, \emph{{Second order
+  cosmological perturbations from inflation}},
+  \href{https://doi.org/10.1016/S0550-3213(03)00550-9}{\emph{Nucl. Phys. B}
+  {\bfseries 667} (2003) 119}
+  [\href{https://arxiv.org/abs/astro-ph/0209156}{{\ttfamily
+  astro-ph/0209156}}].
+
+\bibitem{Mollerach:2003nq}
+S.~Mollerach, D.~Harari and S.~Matarrese, \emph{{CMB polarization from
+  secondary vector and tensor modes}},
+  \href{https://doi.org/10.1103/PhysRevD.69.063002}{\emph{Phys. Rev. D}
+  {\bfseries 69} (2004) 063002}
+  [\href{https://arxiv.org/abs/astro-ph/0310711}{{\ttfamily
+  astro-ph/0310711}}].
+
+\bibitem{Ananda:2006af}
+K.N.~Ananda, C.~Clarkson and D.~Wands, \emph{{The Cosmological gravitational
+  wave background from primordial density perturbations}},
+  \href{https://doi.org/10.1103/PhysRevD.75.123518}{\emph{Phys. Rev. D}
+  {\bfseries 75} (2007) 123518}
+  [\href{https://arxiv.org/abs/gr-qc/0612013}{{\ttfamily gr-qc/0612013}}].
+
+\bibitem{Baumann:2007zm}
+D.~Baumann, P.J.~Steinhardt, K.~Takahashi and K.~Ichiki, \emph{{Gravitational
+  Wave Spectrum Induced by Primordial Scalar Perturbations}},
+  \href{https://doi.org/10.1103/PhysRevD.76.084019}{\emph{Phys. Rev. D}
+  {\bfseries 76} (2007) 084019}
+  [\href{https://arxiv.org/abs/hep-th/0703290}{{\ttfamily hep-th/0703290}}].
+
+\bibitem{Ning:2026nfs}
+Z.~Ning, X.-X.~Zeng, R.-G.~Cai and S.-J.~Wang, \emph{{Numerical simulations of
+  primordial black hole formation via delayed first-order phase transitions}},
+  \href{https://arxiv.org/abs/2601.21878}{{\ttfamily 2601.21878}}.
+
+\bibitem{Garcia-Bellido:2007fiu}
+J.~Garcia-Bellido, D.G.~Figueroa and A.~Sastre, \emph{{A Gravitational Wave
+  Background from Reheating after Hybrid Inflation}},
+  \href{https://doi.org/10.1103/PhysRevD.77.043517}{\emph{Phys. Rev. D}
+  {\bfseries 77} (2008) 043517}
+  [\href{https://arxiv.org/abs/0707.0839}{{\ttfamily 0707.0839}}].
+
+\end{thebibliography}\endgroup

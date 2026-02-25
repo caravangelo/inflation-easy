@@ -55,6 +55,14 @@ To compile the program, simply run:
 make
 ```
 
+### Verifying the Build
+
+Run this command to ensure the code compiles cleanly from source:
+
+```bash
+make clean && make
+```
+
 ## Running the Simulation
 
 ### Input Setup
@@ -62,7 +70,7 @@ make
 Two default potentials are supported:
 
 1. **Numerical potential (default)**  
-   Implements the ultra-slow-roll (USR) potential described as Case I in [arXiv:2410.23942](https://arxiv.org/abs/2410.23942), with $\mathcal{P}_{\zeta,	\rm {tree}}^{	\rm {max}} = 10^{-2}$.
+   Implements the ultra-slow-roll (USR) potential described as Case I in [arXiv:2410.23942](https://arxiv.org/abs/2410.23942), with $\mathcal{P}_{\zeta,\rm{tree}}^{\rm{max}} = 10^{-2}$.
 
    **Note:** This option is slower than the analytical one. For faster runs (e.g., on a laptop), prefer an analytical potential.
 
@@ -93,6 +101,16 @@ Output will appear in the `results/` directory. A runtime log is saved in `outpu
 
 All quantities are given in **reduced Planck units**, where $M_{\mathrm{Pl}}^{\text{red}} = \frac{M_{\mathrm{Pl}}}{\sqrt{8\pi}} = 1$. This sets $\hbar = c = 1$ and $8\pi G = 1$, simplifying the equations.
 
+## Reproducibility Notes
+
+- The random seed is controlled by `seed` in `src/parameters.h`.
+- For reproducible results, record:
+  - commit hash (`git rev-parse HEAD`)
+  - compiler and version (`c++ --version`)
+  - full `src/parameters.h`
+  - whether OpenMP was enabled
+- Main run metadata is written by the code to `results/info.dat`.
+
 ## Jupyter Notebook
 
 An example notebook, `plot.ipynb`, is included to help visualize output data.
@@ -112,6 +130,8 @@ The notebook reads data from `results/` and plots quantities like the field evol
 
 If you use *InflationEasy* in your research, please cite the associated code paper:  
 [arXiv:2506.11797](https://arxiv.org/abs/2506.11797)
+
+A machine-readable citation file is provided in `CITATION.cff`.
 
 Please cite also these additional references where *InflationEasy* was developed and applied:
 
