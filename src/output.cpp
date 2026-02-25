@@ -1070,7 +1070,7 @@ void histograms()
     static FILE *histogram_, *histogramtimes_;
     int i = 0, j = 0, k = 0;
     int binnum; // Index of bin for a given field value
-    double binfreq[nbins]; // The frequency of field values occurring within each bin
+    static std::vector<double> binfreq; // Reused histogram buffer to avoid per-call allocation
     double bmin, bmax, df; // Minimum and maximum field values for each field and bin spacing
     int numpts; // Count the number of points in the histogram for each field.
     static int first = 1;
@@ -1102,10 +1102,10 @@ void histograms()
     df = (bmax - bmin) / (double)(nbins); // bmin will be at the bottom of the first bin and bmax at the top of the last
     if (!std::isfinite(df) || df <= 0.0) df = 1.0;
 
-    // Initialize all frequencies to zero
-    for (i = 0; i < nbins; i++)
-    binfreq[i] = 0.;
+    if ((int)binfreq.size() != nbins) binfreq.assign(nbins, 0.0);
+    else std::fill(binfreq.begin(), binfreq.end(), 0.0);
 
+    // Initialize all frequencies to zero
     // Iterate over grid to determine bin frequencies
     numpts = 0;
     LOOP
@@ -1220,7 +1220,7 @@ void histogramsN()
     static FILE *histogramN_, *histogramtimesN_;
     int i=0, j=0, k=0;
     int binnum;
-    double binfreq[nbins];
+    static std::vector<double> binfreq;
     double bmin, bmax, df;
     int numpts;
 
@@ -1248,8 +1248,8 @@ void histogramsN()
     df = (bmax - bmin) / (double)(nbins);
     if (!std::isfinite(df) || df <= 0.0) df = 1.0;
 
-    for (i = 0; i < nbins; i++)
-    binfreq[i] = 0.;
+    if ((int)binfreq.size() != nbins) binfreq.assign(nbins, 0.0);
+    else std::fill(binfreq.begin(), binfreq.end(), 0.0);
 
     numpts = 0;
     LOOP
@@ -1312,7 +1312,7 @@ void histogramsLOG()
     static FILE *histogramLOG_, *histogramtimesLOG_;
     int i=0, j=0, k=0;
     int binnum;
-    double binfreq[nbins];
+    static std::vector<double> binfreq;
     double bmin, bmax, df;
     int numpts;
 
@@ -1371,8 +1371,8 @@ void histogramsLOG()
     df = (bmax - bmin) / (double)(nbins);
     if (!std::isfinite(df) || df <= 0.0) df = 1.0;
 
-    for (i = 0; i < nbins; i++)
-    binfreq[i] = 0.;
+    if ((int)binfreq.size() != nbins) binfreq.assign(nbins, 0.0);
+    else std::fill(binfreq.begin(), binfreq.end(), 0.0);
 
     numpts = 0;
     LOOP
@@ -1749,7 +1749,7 @@ void histograms_post_inflation()
     static FILE *histogram_, *histogramtimes_;
     int i = 0, j = 0, k = 0;
     int binnum;
-    double binfreq[nbins];
+    static std::vector<double> binfreq;
     double bmin, bmax, df;
     int numpts;
 
@@ -1782,9 +1782,8 @@ void histograms_post_inflation()
     df = (bmax - bmin) / (double)(nbins); // bmin will be at the bottom of the first bin and bmax at the top of the last
     if (!std::isfinite(df) || df <= 0.0) df = 1.0;
 
-    // Initialize all frequencies to zero
-    for (i = 0; i < nbins; i++)
-    binfreq[i] = 0.;
+    if ((int)binfreq.size() != nbins) binfreq.assign(nbins, 0.0);
+    else std::fill(binfreq.begin(), binfreq.end(), 0.0);
 
     // Iterate over grid to determine bin frequencies
     numpts = 0;

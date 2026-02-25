@@ -101,6 +101,8 @@ void load_vector(const std::string& filename, std::vector<double>& vec) {
 }
 
 int main() {
+    load_runtime_parameters("params.txt");
+
     if (seed < 1) {
         printf("Warning: The parameter seed has been set to %d, which will result in incorrect output.\n", seed);
     }

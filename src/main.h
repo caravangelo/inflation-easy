@@ -66,8 +66,8 @@ inline std::pair<int,int> comp_to_indices(int comp) {
 
 // -------------------- Derived lattice quantities --------------------
 
-// Comoving lattice spacing.
-const double dx = L / (double)N;
+// Comoving lattice spacing (run-time, derived from L and N).
+extern double dx;
 
 // Total number of lattice sites.
 const int gridsize = N * N * N;

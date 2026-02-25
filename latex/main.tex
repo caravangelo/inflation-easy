@@ -210,7 +210,7 @@ Although the evolution of the field is fully non-perturbative—with no backgrou
 
 \subsubsection{Background values}
 
-The initial background values of the inflaton, $\bar{\phi}(\tilde\tau_{\rm in})$, and its velocity, $\partial_{\tilde\tau} \bar{\phi}(\tilde\tau_{\rm in})$, are set by the user in the \texttt{parameters.h} file. A typical choice, adopted in the default example (see \cref{sec:default}), is to set them according to the homogeneous inflationary trajectory—i.e., the solution to \eqref{eq:fullcont} with the gradient term omitted. This simple ordinary differential equation can be solved starting a few $e$-folds before the simulation start time, in order to determine the precise value of $\partial_{\tilde\tau} \bar{\phi}(\tilde\tau_{\rm in})$ corresponding to the chosen $\bar{\phi}(\tilde\tau_{\rm in})$.
+The initial background values of the inflaton, $\bar{\phi}(\tilde\tau_{\rm in})$, and its velocity, $\partial_{\tilde\tau} \bar{\phi}(\tilde\tau_{\rm in})$, are set by the user in the run-time parameter file \texttt{params.txt} (or, if absent, by defaults compiled in \texttt{runtime\_parameters.cpp}). A typical choice, adopted in the default example (see \cref{sec:default}), is to set them according to the homogeneous inflationary trajectory—i.e., the solution to \eqref{eq:fullcont} with the gradient term omitted. This simple ordinary differential equation can be solved starting a few $e$-folds before the simulation start time, in order to determine the precise value of $\partial_{\tilde\tau} \bar{\phi}(\tilde\tau_{\rm in})$ corresponding to the chosen $\bar{\phi}(\tilde\tau_{\rm in})$.
 
 The scale factor is initialized as $a = 1$, and its time derivative in program units is determined from the Friedmann equation using the background energy density:
 \begin{equation}
@@ -297,7 +297,7 @@ For further details on the $\delta N$ approach, including the distinction betwee
 
 We now describe the various outputs produced by the code, providing a brief overview of the physical quantities computed during the simulation. A more detailed discussion can be found in~\cite{Caravano:2022yyv}. The key distinction between \texttt{InflationEasy} and other lattice codes is that Fourier-based outputs—such as the inflaton and curvature power spectra—account for the modified dispersion relation. This ensures that the results are independent of the lattice implementation and can be directly compared to analytical predictions. 
 
-All output files are saved in the \texttt{{results/}} directory in \texttt{.dat} format. The public release of the code includes a Python notebook, \texttt{{plot.ipynb}}, which provides examples of how to load and visualize these outputs. Note that not all quantities are computed by default; the generated outputs are controlled via the configuration file \texttt{{parameters.h}}. In \cref{fig}, we show examples of outputs produced by the lattice code in the default setup, which will be discussed in detail below and further in \cref{sec:instructions}. In this section we focus on scalar-sector outputs. Gravitational-wave outputs are documented separately in \cref{sec:GW}.
+All output files are saved in the \texttt{{results/}} directory in \texttt{.dat} format. The public release of the code includes a Python notebook, \texttt{{plot.ipynb}}, which provides examples of how to load and visualize these outputs. Note that not all quantities are computed by default; the generated outputs are controlled primarily via \texttt{params.txt}. In \cref{fig}, we show examples of outputs produced by the lattice code in the default setup, which will be discussed in detail below and further in \cref{sec:instructions}. In this section we focus on scalar-sector outputs. Gravitational-wave outputs are documented separately in \cref{sec:GW}.
 
 The following files may be generated:
 
@@ -312,7 +312,7 @@ The following files may be generated:
     \begin{equation}
         \zeta_{\rm log} = \frac{1}{\eta} \log\left(1 - \eta\, \delta\phi\, \frac{H}{\langle \dot\phi \rangle} \right),
     \end{equation}
-    which assumes a constant second slow-roll parameter $\eta$ (see \cite{Pi:2022ysn,Caravano:2025diq}). The value of $\eta$ must be set in \texttt{{parameters.h}}. These spectra are evaluated only at the final simulation time, in contrast to the inflaton spectra.
+    which assumes a constant second slow-roll parameter $\eta$ (see \cite{Pi:2022ysn,Caravano:2025diq}). The value of $\eta$ must be set in \texttt{params.txt}. These spectra are evaluated only at the final simulation time, in contrast to the inflaton spectra.
 
     \item \textbf{Histogram files:} \\ \texttt{histogram.dat}, \texttt{histogramN.dat}, \texttt{histogramLOG.dat}, along with \texttt{histogramtimes.dat},\\\texttt{histogramtimesN.dat}, and \texttt{histogramtimesLOG.dat}. The first three files contain binned histograms of the inflaton field and the curvature perturbation $\zeta$, using either the full $\delta N$ result or the log-based approximation. The corresponding \texttt{histogramtimes} files include the simulation times at which histograms were computed, along with binning data required to reconstruct the $x$-axis of the histograms.
 
@@ -325,7 +325,8 @@ The following files may be generated:
     \label{sec:structure}
    The source code is contained in the directory \texttt{src/}, which includes the following files:
 \begin{itemize}
-\item \texttt{{parameters.h}} – This is the main configuration header, where the user sets all physical and numerical parameters of the simulation.
+\item \texttt{parameters.h} – Compile-time configuration header (feature toggles, lattice size, and preprocessor branches). Changes here require recompilation.
+\item \texttt{runtime\_parameters.cpp} – Defines default run-time values and the parser for \texttt{params.txt}.
 \item \texttt{potential.cpp} – Contains all functions related to the potential. To change the analytical form of the potential, users should modify the first two functions in this file.
 \item \texttt{main.cpp} – Contains the entry point of the program and coordinates the main evolution steps.
 \item \texttt{main.h} – Header file associated with \texttt{main.cpp}, declaring key functions and including necessary headers.
@@ -354,7 +355,7 @@ This command builds the executable using the compiler selected by the \texttt{Ma
 \begin{lstlisting}[language=bash,numbers=none]
 ./inflation_easy
 \end{lstlisting}
-This runs the simulation with the default configuration. Output files (described in \cref{sec:output}) will be saved in the \texttt{{results/}} directory. During execution, the code prints the current scale factor and number of time steps to the terminal. These messages can be disabled in \texttt{{parameters.h}}.
+This runs the simulation with the default configuration. A ready-to-use \texttt{params.txt} is included in the repository root; users can edit its key-value entries to override run-time defaults. Output files (described in \cref{sec:output}) will be saved in the \texttt{{results/}} directory. During execution, the code prints the current scale factor and number of time steps to the terminal. These messages can be disabled in \texttt{params.txt}.
 
 A Python notebook \texttt{{plot.ipynb}} is included in the \texttt{notebooks/} directory. It provides instructions for loading and plotting quantities such as the power spectrum and field histograms (including the ones of $\zeta$) at the end of the simulation. In \cref{fig}, we show example outputs from the notebook corresponding to the default code example, which will be introduced in the next section.
 
@@ -370,12 +371,22 @@ The code includes two default potential options:
     V(\phi) = V_0 \left(1 - \frac{1-n_s}{2}\frac{\phi^2}{2 M_{\rm Pl}^2}\right).
     \end{equation}
 \end{itemize}
-To toggle between the two options, change the following line in \texttt{{parameters.h}}:
+Switching between these two defaults requires two explicit steps. This separation is intentional: the two scenarios correspond to different physics inputs (tabulated numerical potential versus analytic expression), so they use different code branches and different run-time parameter sets.
+
+\textbf{Step 1 (compile-time choice).} In \texttt{parameters.h}, choose which branch to compile:
 
 \begin{lstlisting}[language=C++, firstnumber=3,caption={},numbers=none]
 // Set to 1 to enable a numerical potential loaded from file, 0 for analytic expression
 #define numerical_potential 1
 \end{lstlisting}
+Because this is a compile-time flag, you must recompile after changing it.
+
+\textbf{Step 2 (run-time parameter set).} Match \texttt{params.txt} to the selected branch. The repository provides two presets: \texttt{params.numerical.txt} and \texttt{params.analytic.txt}. Copy the appropriate one to \texttt{params.txt}:
+\begin{itemize}
+    \item \textbf{Analytic default}: set \texttt{numerical\_potential} to \texttt{0}. Copy \path{params.analytic.txt} to \path{params.txt}, then rebuild.
+    \item \textbf{Numerical default}: set \texttt{numerical\_potential} to \texttt{1}. Copy \path{params.numerical.txt} to \path{params.txt}, then rebuild.
+\end{itemize}
+
 By default, the code runs with the numerical USR potential on a lattice of size $N_{\rm pts}^3 = 128^3$ and runs until the scale factor reaches $a=2N_{\rm pts}=256$ (where $a=1$ at the beginning of the simulation), corresponding to $N = \log(256) \simeq 5.5$ e-folds of evolution. The total number of $e$-folds must be chosen based on the spatial resolution, which ultimately dictates the maximum running time of the simulation. See the next section for how to set the total number of e-folds for a given lattice size.
 
 Running this benchmark code, including the $\delta N$ calculation to compute $\zeta$ from the lattice (but excluding the gravitational-wave calculation of \cref{sec:GW}), on a machine with an Intel(R) Core(TM) i5-1038NG7 CPU @ 2.00\,GHz and 16\,GB RAM, compiled with \texttt{Apple clang 16.0.0}, takes 14 minutes and 20 seconds. Without the $\delta N$ calculation, it takes 8 minutes and 45 seconds. This timing refers to the unparallelized version of the code. If OpenMP is available on your system, you can expect improved performance depending on the number of cores.
@@ -411,36 +422,36 @@ For a numerical potential, update the files in \texttt{inputs/}:
 \end{itemize}
 All files must be single-column. Note that running simulations with an analytic potential is much faster than interpolating a numerical potential.
 
-\subsubsection*{Step 2: Set Parameters in \texttt{{parameters.h}}}
+\subsubsection*{Step 2: Set Run-time Parameters in \texttt{params.txt}}
 
-Once the potential is defined, the next step is to configure the relevant parameters in the \texttt{{parameters.h}} file. This file includes brief explanations of each parameter, but here we provide a more detailed guide to setting them appropriately.
+Once the potential is defined, the next step is to configure the relevant run-time parameters in \texttt{params.txt}. The compile-time header \texttt{parameters.h} should be used only for options that affect compiled code paths (feature toggles and lattice size).
 
 The first parameters to set are the physical parameters of the potential. For example, for the hilltop potential, one of the default models, this reads:
-\begin{lstlisting}[language=C++,
-firstnumber=55,caption={},numbers=none]
-const double V0 = 3.338e-13; // Potential parameter
-const double ns = 0.97; // Spectral index
+\begin{lstlisting}[language=bash,numbers=none]
+V0 = 3.338e-13
+ns = 0.97
 \end{lstlisting}
 This defines $V_0$, the overall amplitude of the potential, and the scalar spectral index $n_s$. If your model includes more than one parameter (e.g. a coupling or a second mass scale), you should declare each of them in this section.
 
 Next, set the field rescaling factor, referred to as $B$ in \cref{eq:rescaling}:
-\begin{lstlisting}[language=C++, firstnumber=59,caption={},numbers=none]
-const double rescale_B = sqrt(V0); // Rescaling factor
+\begin{lstlisting}[language=bash,numbers=none]
+# Optional: if omitted, the code sets rescale_B = sqrt(V0)
+rescale_B = 5.778e-7
 \end{lstlisting}
 This parameter sets the code units for both the time derivatives and the lattice spacing. A typical and convenient choice is to use either the value of the Hubble rate or the inflaton mass at the beginning of the simulation. All dimensionful quantities in the simulation are rescaled by this factor, so this choice determines the unit system in which the simulation runs.
 
 After the physical parameters and code units are defined, you must set the initial value of the homogeneous part of the inflaton field and its time derivative in code units:
-\begin{lstlisting}[language=C++, firstnumber=60,caption={},numbers=none]
-const double initial_field = 0.0935; // Initial field value
-const double initial_derivative = 0.000796; // Initial field velocity (in code units)
+\begin{lstlisting}[language=bash,numbers=none]
+initial_field = 0.0935
+initial_derivative = 0.000796
 \end{lstlisting}
 These values determine the starting point of the background evolution and should be chosen based on where you want the simulation to begin along the inflationary trajectory. 
 
 You must also choose the comoving box size of the lattice:
-\begin{lstlisting}[language=C++, firstnumber=62,caption={},numbers=none]
-const double L = 10.0; // Comoving box size in code units (must be sub-horizon at start)
+\begin{lstlisting}[language=bash,numbers=none]
+L = 10.0
 \end{lstlisting}
-The comoving size $L$, together with the number of lattice points $N_{\rm pts}$ (also set in \texttt{{parameters.h}}), determines the infrared and ultraviolet cutoffs of the simulation \cite{Caravano:2021pgc}:\footnote{
+The comoving size $L$, together with the number of lattice points $N_{\rm pts}$ (set at compile time in \texttt{parameters.h}), determines the infrared and ultraviolet cutoffs of the simulation \cite{Caravano:2021pgc}:\footnote{
 To express these comoving momenta in physical units (e.g.\ ${\rm Mpc}^{-1}$), two steps are required. First, one converts from reduced Planck units to the desired physical unit system using standard unit conversions. Second, the comoving momenta are defined with respect to the scale factor normalization used in the simulation; converting them to comoving momenta defined at a later reference time (such as today) requires specifying the post-inflationary expansion history, including assumptions about reheating and the subsequent radiation- and matter-dominated eras.
 }
 
@@ -453,35 +464,39 @@ To ensure accurate initial conditions, the comoving box size should be smaller t
 
 The value of $N_{\rm pts}$, which sets the lattice resolution and UV cutoff, must be balanced against computational cost. Larger values of $N_{\rm pts}$ yield higher resolution, but increase the memory and runtime requirements. For example, simulations larger than $N^3_{\rm pts} = 128^3$ may be difficult to run on a laptop.
 
-The final simulation time is set by specifying the final value of the scale factor:
-\begin{lstlisting}[language=C++, firstnumber=21,caption={},numbers=none]
-// Final scale factor value (simulation stops when a >= af)
-const double af = 2 * N;
+The final simulation time can be set by specifying the final value of the scale factor:
+\begin{lstlisting}[language=bash,numbers=none]
+af = 256
 \end{lstlisting}
-This value must be large enough to ensure the comoving box is significantly larger than the horizon by the end of the simulation. A good rule of thumb is to stop when the comoving lattice spacing satisfies $\Delta x \sim 1/(aH)$, so that each lattice point evolves as an effectively separate universe. Extending the simulation significantly beyond this time is typically unnecessary and does not affect the dynamics: at that point, no new modes enter the horizon due to the finite UV resolution of the lattice. This remains true unless the chosen potential exhibits interesting super-horizon dynamics, in which case it may be worth running the simulation for a longer time. In practice, one can experiment to find a suitable \texttt{af} value by ensuring that the fluctuation dynamics have frozen by the end of the run (for example, by checking that the power spectrum of the linear curvature perturbation $\zeta_{\rm lin} = -H \delta\phi / \dot\phi$ has stabilized).
+This entry is optional. If \texttt{af} is not set in \texttt{params.txt}, the code uses the default
+\[
+a_f = 2N_{\rm pts},
+\]
+where $N_{\rm pts}$ is the compile-time lattice size set in \texttt{parameters.h}. The chosen value must be large enough to ensure the comoving box is significantly larger than the horizon by the end of the simulation. A good rule of thumb is to stop when the comoving lattice spacing satisfies $\Delta x \sim 1/(aH)$, so that each lattice point evolves as an effectively separate universe. Extending the simulation significantly beyond this time is typically unnecessary and does not affect the dynamics: at that point, no new modes enter the horizon due to the finite UV resolution of the lattice. This remains true unless the chosen potential exhibits interesting super-horizon dynamics, in which case it may be worth running the simulation for a longer time. In practice, one can experiment to find a suitable \texttt{af} value by ensuring that the fluctuation dynamics have frozen by the end of the run (for example, by checking that the power spectrum of the linear curvature perturbation $\zeta_{\rm lin} = -H \delta\phi / \dot\phi$ has stabilized).
 
 As part of a convergence test, it is recommended to vary the values of $L$ and $N_{\rm pts}$ to verify that the physical results do not depend on the lattice cutoffs. This is a standard consistency check in lattice simulations. Note, however, that in some models (particularly those with strong scale dependence), physical quantities may naturally depend on the cutoffs. In those cases, the goal is not to eliminate cutoff dependence but to determine whether it is a physical feature or a numerical artifact.
 
 Another crucial parameter is the time step for the numerical integration:
 
-\begin{lstlisting}[language=C++, firstnumber=63,caption={},numbers=none]
-const double dt = 0.0005; // Time step
+\begin{lstlisting}[language=bash,numbers=none]
+dt = 0.0005
 \end{lstlisting}
 
 The time step must be small enough to ensure stability and accuracy. A good practice is to rerun the simulation with different values of \texttt{dt} and check that the results remain unchanged. These convergence tests can be performed, at first, on small grids (e.g., $64^3$) to save time in determining a reasonable range of $dt$ values.
 
 The time step and final time for the $\delta N$ calculation are specified separately:
-\begin{lstlisting}[language=C++, firstnumber=69,caption={},numbers=none]
-const double dN = 0.0000001; // e-fold increment in deltaN evolution
-const double Nend = 0.001; // Final e-folding time for deltaN run
+\begin{lstlisting}[language=bash,numbers=none]
+dN = 0.0000001
+Nend = 0.001
 \end{lstlisting}
 Choosing these parameters requires some care. The step size \texttt{dN} must be small enough to resolve the evolution of the separate-universe equation (\cref{eq:eom_deltaN}). As a rule of thumb, it should be much smaller than the expected amplitude of the curvature perturbation, i.e. $\delta N \ll \sqrt{\mathcal{P}_{\zeta}}$. For very small $\mathcal{P}_{\zeta}$, the required step size becomes prohibitively small, and the $\delta N$ calculation is typically unnecessary—nonlinear effects are only important for $\mathcal{P}_{\zeta} \gtrsim 10^{-4}$, as shown in~\cite{Caravano:2025diq}.
 
 The final time \texttt{Nend} should be long enough for all lattice points to reach a common final constant-field hypersurface $\phi_{\rm ref}$. By default, the simulation sets this surface automatically using the same criterion used to stop the separate-universe evolution (for generic potentials: minimum $V$ at the end of the run; for monotonic branches: extremum of $|\phi|$). This choice approximates a uniform-energy final slice when the dynamics is close to an attractor, but it may be problematic in non-attractor regimes or in models with multiple minima/extended plateaus. In such cases, the user can manually define the hypersurface by uncommenting the following line:
-\begin{lstlisting}[language=C++, firstnumber=71,caption={},numbers=none]
-// const double phiref_manual = value; // (Optional) manually set the reference $\phi$ value
+\begin{lstlisting}[language=bash,numbers=none]
+use_phiref_manual = 1
+phiref_manual_value = 2.68
 \end{lstlisting}
-When this line is uncommented and a value is provided, the $\delta N$ calculation will use the manually specified reference field value instead of determining it dynamically.
+When enabled, the $\delta N$ calculation will use the manually specified reference field value instead of determining it dynamically.
 
 \section{Scalar-induced gravitational waves}
 \label{sec:GW}
@@ -619,7 +634,7 @@ The tensor power spectra are defined through
 \langle h_{ij}^{{\rm TT}\,\prime}(\eta,\vec{k})\, h_{ij}^{{\rm TT}\,\prime}(\eta,\vec{k}') \rangle
 &= (2\pi)^3 \delta^{(3)}(\vec{k}+\vec{k}')\, P_{h'}(\eta,k).
 \end{align}
-From these spectra we define the gravitational-wave energy density per logarithmic interval in wavenumber as
+From these spectra we define the gravitational-wave energy density per logarithmic interval as
 \begin{equation}
 \label{eq:GW_rho}
 \frac{d\rho_{\rm GW}}{d\ln k}
@@ -703,7 +718,15 @@ The code stores the tensor time derivatives in the same rescaled time coordinate
 
 \subsubsection*{Activating the GW calculation}
 
-The computation of SIGWs is controlled via the configuration file \texttt{parameters.h}. The GW calculation during inflation and the optional post-inflationary stage can be enabled through dedicated flags.
+The computation of SIGWs is controlled by both compile-time and run-time parameters: feature activation is compile-time in \texttt{parameters.h}, while run-time settings (e.g.\ equation-of-state and integration controls) are set in \texttt{params.txt}.
+For the post-inflation stage, the final scale factor can be set with
+\begin{lstlisting}[language=bash,numbers=none]
+af_post_inflation = ...
+\end{lstlisting}
+If this entry is omitted, the default is also
+\[
+a_f^{\rm post} = 2N_{\rm pts}.
+\]
 
 \subsubsection*{Outputs}
 
@@ -714,15 +737,22 @@ When enabled, the code outputs tensor power spectra constructed from the TT-proj
 \end{itemize}
 are produced. If the post-inflationary evolution is enabled, analogous files are written in the directory
 \begin{itemize}
-    \item \texttt{post\_inflation/spectraGW.dat},
-    \item \texttt{post\_inflation/spectraGWdot.dat}.
+    \item \path{post_inflation/spectraGW.dat},
+    \item \path{post_inflation/spectraGWdot.dat}.
 \end{itemize}
-The \texttt{post\_inflation/} directory also contains scalar-sector outputs associated with the post-inflationary evolution of the Newtonian potential $\Phi$. The following files may be generated:
+The \path{post_inflation/} directory also contains scalar-sector outputs.
+These are associated with the post-inflationary evolution of the Newtonian potential $\Phi$.
+The following files may be generated:
 \begin{itemize}
-    \item \textbf{Background files:} \\\texttt{post\_inflation/sf.dat}, \texttt{post\_inflation/means.dat}, \texttt{post\_inflation/velocity.dat}, and \texttt{post\_inflation/variance.dat}. These files contain, respectively, the simulation time, scale factor $a$, and conformal Hubble rate $\mathcal{H}$, the spatial average $\langle \Phi \rangle$, its time derivative $\langle \Phi' \rangle$, and the variance $\langle \Phi^2 \rangle - \langle \Phi \rangle^2$.
-    \item \textbf{Scalar spectra files:} \\ \texttt{post\_inflation/spectra.dat} and \texttt{post\_inflation/spectratimes.dat}. These contain the power spectrum of the Newtonian potential $\Phi$, stored as a concatenated list of spectra evaluated at different times, and the corresponding evaluation times.
+    \item \textbf{Background files:}
+    \path{post_inflation/sf.dat}, \path{post_inflation/means.dat},
+    \path{post_inflation/velocity.dat}, and \path{post_inflation/variance.dat}.
+    These files contain, respectively, the simulation time, scale factor $a$, and conformal Hubble rate $\mathcal{H}$, the spatial average $\langle \Phi \rangle$, its time derivative $\langle \Phi' \rangle$, and the variance $\langle \Phi^2 \rangle - \langle \Phi \rangle^2$.
+    \item \textbf{Scalar spectra files:}
+    \path{post_inflation/spectra.dat} and \path{post_inflation/spectratimes.dat}.
+    These contain the power spectrum of the Newtonian potential $\Phi$, stored as a concatenated list of spectra evaluated at different times, and the corresponding evaluation times.
 \end{itemize}
- From these outputs, one can directly construct the dimensionless tensor power spectrum $\Delta_h^2(k)$ and the gravitational-wave energy density spectrum $\Omega_{\rm GW}(k)$ using \cref{eq:GW_Omega}, together with the background quantities $a(\eta)$ and $\mathcal{H}(\eta)$ provided in \texttt{sf.dat} and \texttt{sf\_post.dat}. Figure~\ref{fig:gw} shows a typical example of the resulting post-inflationary tensor spectra. An explicit example illustrating how to compute $\Omega_{\rm GW}$ from the raw output files and reproduce these plots is provided in the example notebook included with the public release.
+ From these outputs, one can directly construct the dimensionless tensor power spectrum $\Delta_h^2(k)$ and the gravitational-wave energy density spectrum $\Omega_{\rm GW}(k)$ using \cref{eq:GW_Omega}, together with the background quantities $a(\eta)$ and $\mathcal{H}(\eta)$ provided in \path{sf.dat} and \path{sf_post.dat}. Figure~\ref{fig:gw} shows a typical example of the resulting post-inflationary tensor spectra. An explicit example illustrating how to compute $\Omega_{\rm GW}$ from the raw output files and reproduce these plots is provided in the example notebook included with the public release.
 
 \begin{figure}
     \centering
@@ -743,7 +773,7 @@ The \texttt{post\_inflation/} directory also contains scalar-sector outputs asso
 
 In addition to scalar observables, \texttt{InflationEasy} includes the computation of scalar-induced gravitational waves. The code accounts for contributions generated both during inflation and during the subsequent horizon re-entry of scalar perturbations, enabling fully nonlinear predictions of the resulting stochastic gravitational-wave background. This makes \texttt{InflationEasy} a unified numerical framework to study the joint scalar and tensor signatures of inflation within a single simulation setup.
 
-A key strength of \texttt{InflationEasy} is its simplicity and accessibility. Despite being written in C++, the code is modular and easy to read, making it suitable even for users with limited programming experience. Physical and numerical parameters are configured in a single file, \texttt{parameters.h}, while inflationary potentials can be modified straightforwardly in \texttt{potential.cpp}.
+A key strength of \texttt{InflationEasy} is its simplicity and accessibility. Despite being written in C++, the code is modular and easy to read, making it suitable even for users with limited programming experience. Compile-time options are configured in \texttt{parameters.h}, while most physical and numerical run settings are controlled through \texttt{params.txt}; inflationary potentials can be modified straightforwardly in \texttt{potential.cpp}.
 
 Looking ahead, possible extensions of \texttt{InflationEasy} include support for multifield models and further numerical improvements, such as enhanced parallelization and higher-order spatial discretization schemes. We hope that \texttt{InflationEasy} will serve as a useful tool for both model builders and phenomenologists interested in the nonlinear dynamics of inflation and its observational signatures. We welcome feedback via the public repository at \href{https://github.com/caravangelo/inflation-easy.git}{https://github.com/caravangelo/inflation-easy.git}.
 	%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

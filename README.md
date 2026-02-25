@@ -23,8 +23,9 @@ More information is available in the associated publication: [arXiv:2506.11797](
 - `evolution.cpp`: Implements the core algorithm for time evolution of the scalar field.
 - `output.cpp`: Handles writing results to disk, including observables and diagnostics.
 - `potential.cpp`: Defines the inflationary potential, either analytically or via input files.
-- `parameters.h`: Central header file for configuring physical and numerical parameters.  
-  **Important:** Edit this file to configure your simulation setup.
+- `parameters.h`: Compile-time configuration (feature toggles and lattice size).  
+  **Important:** Edit this file only for settings that require recompilation.
+- `runtime_parameters.cpp`: Run-time defaults and parser for `params.txt` overrides.
 
 ### Input files (`inputs/`)
 These files are only required when using a **numerical potential** (`numerical_potential = 1` in `parameters.h`):
@@ -79,7 +80,30 @@ Two default potentials are supported:
    
  $$V(\phi) = V_0 \left(1 - \frac{1-n_s}{2}\frac{\phi^2}{2 M_{\rm Pl}^2}\right).$$  
    
-Switch between these via the `numerical_potential` flag in `parameters.h`.
+Switch between these via the compile-time `numerical_potential` flag in `parameters.h` (requires recompilation).
+To keep run-time values consistent with the selected potential mode, use the matching preset:
+
+- Numerical (default): `params.numerical.txt`
+- Analytical hilltop: `params.analytic.txt`
+
+### Configuration Model
+
+InflationEasy now supports two classes of parameters:
+
+- Compile-time parameters (`src/parameters.h`): feature toggles and lattice layout (`N`).
+- Run-time parameters (`params.txt`): physical values, time steps, output options, and most scan parameters.
+
+A ready-to-use `params.txt` is included at the repository root.
+You can edit it directly; values there override the defaults compiled into the executable.
+Two preset profiles are also included for convenience:
+
+```bash
+# Numerical profile (default)
+cp params.numerical.txt params.txt
+
+# Analytic profile
+cp params.analytic.txt params.txt
+```
 
 ### Custom Potentials
 
@@ -87,7 +111,7 @@ To define a custom potential:
 
 - For an analytical potential, modify the relevant functions in `potential.cpp`.
 - For a numerical potential, place `field_values.dat`, `potential.dat`, and `potential_derivative.dat` in the `inputs/` directory. These must be one-value-per-line.
-- Adjust physical and numerical parameters in `parameters.h`.
+- Adjust physical and numerical run parameters in `params.txt` (or in defaults inside `runtime_parameters.cpp`).
 
 ### Running the Code
 
@@ -103,11 +127,12 @@ All quantities are given in **reduced Planck units**, where $M_{\mathrm{Pl}}^{\t
 
 ## Reproducibility Notes
 
-- The random seed is controlled by `seed` in `src/parameters.h`.
+- The random seed is controlled by `seed` in `params.txt` (or by defaults in `src/runtime_parameters.cpp`).
 - For reproducible results, record:
   - commit hash (`git rev-parse HEAD`)
   - compiler and version (`c++ --version`)
-  - full `src/parameters.h`
+  - full `src/parameters.h` (compile-time)
+  - full `params.txt` used for the run (run-time)
   - whether OpenMP was enabled
 - Main run metadata is written by the code to `results/info.dat`.
 

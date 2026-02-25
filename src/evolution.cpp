@@ -320,7 +320,6 @@ void evolve_fieldsN(double d) {
 }
 
 // Determine reference φ value for ending deltaN integration
-#ifndef phiref_manual
 double get_phiref() {
     DECLARE_INDICES
     double fref = f[idx(0,0,0)];
@@ -339,7 +338,6 @@ double get_phiref() {
 
     return fref;
 }
-#endif
 
 // Run main deltaN integration loop
 void run_deltaN_loop(FILE* output_) {
@@ -352,11 +350,7 @@ void run_deltaN_loop(FILE* output_) {
     initializeN();
     evolve_fieldsN(0.5 * dN);
 
-#ifdef phiref_manual
-    phiref = phiref_manual;
-#else
-    phiref = get_phiref();
-#endif
+    phiref = use_phiref_manual ? phiref_manual_value : get_phiref();
 
     while (Ne <= Nend) {
         evolve_derivsN(dN);

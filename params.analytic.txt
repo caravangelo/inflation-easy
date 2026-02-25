@@ -1,0 +1,42 @@
+# Analytic-potential preset (hilltop)
+# Use with: numerical_potential = 0 in src/parameters.h
+
+seed = 8
+# Optional: final inflation scale factor. If omitted, defaults to 2*N.
+# af = 256
+dt = 0.001
+
+V0 = 3.338e-13
+ns = 0.97
+# Optional: if omitted, the code sets rescale_B = sqrt(V0)
+# rescale_B = 5.777542733278901e-07
+initial_field = 0.0935
+initial_derivative = 0.000796
+L = 10.0
+
+output_freq = 200
+output_infrequent_freq = 200
+output_spectra = 1
+output_histogram = 1
+output_energy = 1
+output_box3D = 0
+output_box2D = 0
+output_bispectrum = 0
+screen_updates = 1
+nbins = 256
+
+high_cutoff_index = 0.0
+low_cutoff_index = 0.0
+forcing_cutoff = 0
+
+dN = 0.0000001
+Nend = 0.001
+use_phiref_manual = 0
+output_LOG = 0
+eta_log = -0.5
+
+horizon_factor = 1.0
+omega = 0.3333333333333333
+dt_post_inflation = 0.001
+# Optional: final post-inflation scale factor. If omitted, defaults to 2*N.
+# af_post_inflation = 256

@@ -1,0 +1,42 @@
+# Numerical-potential preset (default)
+# Use with: numerical_potential = 1 in src/parameters.h
+
+seed = 8
+# Optional: final inflation scale factor. If omitted, defaults to 2*N.
+# af = 256
+dt = 0.001
+
+V0 = 3e-9
+# Optional: if omitted, the code sets rescale_B = sqrt(V0)
+# rescale_B = 5.4772255750516614e-05
+initial_field = 2.9181235049318586
+initial_derivative = -0.06727651095116181
+L = 10.0
+
+output_freq = 500
+output_infrequent_freq = 500
+output_spectra = 1
+output_histogram = 1
+output_energy = 1
+output_box3D = 0
+output_box2D = 1
+output_bispectrum = 0
+screen_updates = 1
+nbins = 256
+
+high_cutoff_index = 0.0
+low_cutoff_index = 0.0
+forcing_cutoff = 0
+
+dN = 0.0001
+Nend = 5.0
+use_phiref_manual = 0
+# phiref_manual_value = 2.680654050913246
+output_LOG = 0
+eta_log = -0.5
+
+horizon_factor = 1.0
+omega = 0.3333333333333333
+dt_post_inflation = 0.001
+# Optional: final post-inflation scale factor. If omitted, defaults to 2*N.
+# af_post_inflation = 256
