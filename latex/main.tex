@@ -371,27 +371,28 @@ The code includes two default potential options:
     V(\phi) = V_0 \left(1 - \frac{1-n_s}{2}\frac{\phi^2}{2 M_{\rm Pl}^2}\right).
     \end{equation}
 \end{itemize}
-Switching between these two defaults requires two explicit steps. This separation is intentional: the two scenarios correspond to different physics inputs (tabulated numerical potential versus analytic expression), so they use different code branches and different run-time parameter sets.
+By default, the code runs with the numerical USR potential on a lattice of size $N_{\rm pts}^3 = 128^3$ and runs until the scale factor reaches $a=2N_{\rm pts}=256$ (where $a=1$ at the beginning of the simulation), corresponding to $N = \log(256) \simeq 5.5$ e-folds of evolution. The total number of $e$-folds must be chosen based on the spatial resolution, which ultimately dictates the maximum running time of the simulation. See the next section for how to set the total number of e-folds for a given lattice size.
 
+Running this benchmark code, including the $\delta N$ calculation to compute $\zeta$ from the lattice (but excluding the gravitational-wave calculation of \cref{sec:GW}), on a machine with an Intel(R) Core(TM) i5-1038NG7 CPU @ 2.00\,GHz and 16\,GB RAM, compiled with \texttt{Apple clang 16.0.0}, takes 14 minutes and 20 seconds. Without the $\delta N$ calculation, it takes 8 minutes and 45 seconds. This timing refers to the unparallelized version of the code. If OpenMP is available on your system, you can expect improved performance depending on the number of cores.
+
+In \cref{fig}, we show the outputs of the code for the default example with a USR potential. These plots are generated using the example Python notebook \texttt{{plot.ipynb}} located in the \texttt{{notebooks}} directory. They display lattice outputs such as background quantities $\langle \phi \rangle$ and $\langle \dot{\phi} \rangle$, energy components, the power spectrum of $\zeta$, its 1-point probability distribution function (PDF), and a 2D snapshot of $\zeta$ in real space.
+
+\subsubsection*{Switching}
+Switching between the two defaults requires two explicit steps.
+This split is intentional: the two cases correspond to different physics inputs (tabulated numerical potential versus analytic potential), so they use different code branches and run-time parameter presets. \vspace{0.5mm} \\ 
 \textbf{Step 1 (compile-time choice).} In \texttt{parameters.h}, choose which branch to compile:
 
 \begin{lstlisting}[language=C++, firstnumber=3,caption={},numbers=none]
 // Set to 1 to enable a numerical potential loaded from file, 0 for analytic expression
 #define numerical_potential 1
 \end{lstlisting}
-Because this is a compile-time flag, you must recompile after changing it.
-
+Because this is a compile-time flag, you must recompile after changing it. \vspace{0.5mm} \\ 
 \textbf{Step 2 (run-time parameter set).} Match \texttt{params.txt} to the selected branch. The repository provides two presets: \texttt{params.numerical.txt} and \texttt{params.analytic.txt}. Copy the appropriate one to \texttt{params.txt}:
 \begin{itemize}
     \item \textbf{Analytic default}: set \texttt{numerical\_potential} to \texttt{0}. Copy \path{params.analytic.txt} to \path{params.txt}, then rebuild.
     \item \textbf{Numerical default}: set \texttt{numerical\_potential} to \texttt{1}. Copy \path{params.numerical.txt} to \path{params.txt}, then rebuild.
 \end{itemize}
 
-By default, the code runs with the numerical USR potential on a lattice of size $N_{\rm pts}^3 = 128^3$ and runs until the scale factor reaches $a=2N_{\rm pts}=256$ (where $a=1$ at the beginning of the simulation), corresponding to $N = \log(256) \simeq 5.5$ e-folds of evolution. The total number of $e$-folds must be chosen based on the spatial resolution, which ultimately dictates the maximum running time of the simulation. See the next section for how to set the total number of e-folds for a given lattice size.
-
-Running this benchmark code, including the $\delta N$ calculation to compute $\zeta$ from the lattice (but excluding the gravitational-wave calculation of \cref{sec:GW}), on a machine with an Intel(R) Core(TM) i5-1038NG7 CPU @ 2.00\,GHz and 16\,GB RAM, compiled with \texttt{Apple clang 16.0.0}, takes 14 minutes and 20 seconds. Without the $\delta N$ calculation, it takes 8 minutes and 45 seconds. This timing refers to the unparallelized version of the code. If OpenMP is available on your system, you can expect improved performance depending on the number of cores.
-
-In \cref{fig}, we show the outputs of the code for the default example with a USR potential. These plots are generated using the example Python notebook \texttt{{plot.ipynb}} located in the \texttt{{notebooks}} directory. They display lattice outputs such as background quantities $\langle \phi \rangle$ and $\langle \dot{\phi} \rangle$, energy components, the power spectrum of $\zeta$, its 1-point probability distribution function (PDF), and a 2D snapshot of $\zeta$ in real space.
 
 \subsection{Configuring a New Potential}
 \label{sec:configuring}
@@ -479,7 +480,7 @@ As part of a convergence test, it is recommended to vary the values of $L$ and $
 Another crucial parameter is the time step for the numerical integration:
 
 \begin{lstlisting}[language=bash,numbers=none]
-dt = 0.0005
+dt = 0.001
 \end{lstlisting}
 
 The time step must be small enough to ensure stability and accuracy. A good practice is to rerun the simulation with different values of \texttt{dt} and check that the results remain unchanged. These convergence tests can be performed, at first, on small grids (e.g., $64^3$) to save time in determining a reasonable range of $dt$ values.
