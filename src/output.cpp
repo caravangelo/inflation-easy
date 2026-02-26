@@ -1423,6 +1423,27 @@ void output_parameters()
         fprintf(info_, "f0=%f\n", initial_field);
         fprintf(info_, "fd0=%f\n", initial_derivative);
         fprintf(info_, "dt=%f, dt/dx=%f\n", dt, dt / dx);
+        fprintf(info_, "inflation_integrator=%s\n", integrator_name());
+#if perform_deltaN
+        fprintf(info_, "deltaN_integrator=%s\n", deltaN_integrator_name());
+#endif
+#if post_inflation
+        fprintf(info_, "post_inflation_integrator=%s\n", post_inflation_integrator_name());
+#endif
+        if (integrator == INTEGRATOR_RK45
+#if perform_deltaN
+            || deltaN_integrator == INTEGRATOR_RK45
+#endif
+#if post_inflation
+            || post_inflation_integrator == INTEGRATOR_RK45
+#endif
+        ) {
+            fprintf(info_, "rk45_abs_tol=%e\n", rk45_abs_tol);
+            fprintf(info_, "rk45_rel_tol=%e\n", rk45_rel_tol);
+            fprintf(info_, "rk45_min_dt=%e\n", rk45_min_dt);
+            fprintf(info_, "rk45_max_dt=%e\n", rk45_max_dt);
+            fprintf(info_, "rk45_safety=%e\n", rk45_safety);
+        }
         fprintf(info_, "rescale_s=%f\n", rescale_s);
         fprintf(info_, "rescale_B=%e\n", rescale_B);
         time(&tStart);
@@ -1445,7 +1466,7 @@ void output_parameters()
 // Calculate and save quantities (means, variances, etc.). If force>0 infrequent calculations are performed
 void save(int infrequent)
 {
-    if (t > 0.) // Synchronize field values and derivatives
+    if (inflation_uses_staggered_derivatives() && t > 0.) // Synchronize field values and derivatives
     evolve_fields(-.5 * dt * pow(astep, rescale_s - 1));
 
     meansvars(infrequent);
@@ -1475,7 +1496,7 @@ void save(int infrequent)
         histograms();
     }
 
-    if (t > 0.) // Desynchronize field values and derivatives
+    if (inflation_uses_staggered_derivatives() && t > 0.) // Desynchronize field values and derivatives
     evolve_fields(.5 * dt * pow(astep, rescale_s - 1));
 }
 
@@ -1498,15 +1519,17 @@ void save_last()
 #if perform_deltaN
 void saveN()
 {
-    if (t > 0.)
+    if (deltaN_uses_staggered_derivatives() && t > 0.)
     evolve_fieldsN(-.5 * dN);
 
     float Nmean = 0.;
     DECLARE_INDICES
 
+    const double deltaN_cutoff = Nend - (deltaN_uses_staggered_derivatives() ? dN : 0.0);
+
     LOOP
     {
-        if (deltaN[idx(i,j,k)] <= (Nend - dN))
+        if (deltaN[idx(i,j,k)] <= deltaN_cutoff)
         Nmean += deltaN[idx(i,j,k)];
     }
     Nmean = Nmean / gridsize;
@@ -1523,14 +1546,14 @@ void saveN()
 
     LOOP
     {
-        if (deltaN[idx(i,j,k)] > (Nend - dN - Nmean))
+        if (deltaN[idx(i,j,k)] > (deltaN_cutoff - Nmean))
         deltaN[idx(i,j,k)] = 0;
     }
 
     if (output_spectra)
     spectraN();
 
-    if (t > 0.)
+    if (deltaN_uses_staggered_derivatives() && t > 0.)
     evolve_fieldsN(.5 * dN);
 }
 #else
@@ -1814,7 +1837,7 @@ void histograms_post_inflation()
 // Calculate and save quantities
 void save_post_inflation(int infrequent)
 {
-    if (t > 0.) // Synchronize field values and derivatives
+    if (post_inflation_uses_staggered_derivatives() && t > 0.) // Synchronize field values and derivatives
     evolve_fields(-.5 * dt_post_inflation);
 
     meansvars_post_inflation(infrequent);
@@ -1835,7 +1858,7 @@ void save_post_inflation(int infrequent)
         histograms_post_inflation();
     }
 
-    if (t > 0.) // Desynchronize field values and derivatives
+    if (post_inflation_uses_staggered_derivatives() && t > 0.) // Desynchronize field values and derivatives
     evolve_fields(.5 * dt_post_inflation);
 }
 

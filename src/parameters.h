@@ -41,13 +41,28 @@ const int N = 128;
 
 // -------------------- Monotonicity hints (compile-time) --------------------
 
-// These are used by preprocessor branches in the deltaN stopping criterion.
+// These compile-time flags select which deltaN stopping-condition potential
+// criterion is compiled in (field rolling direction toward/away from the end surface).
+// They are NOT runtime params.txt keys.
+//
+// Default behavior keeps the historical auto-switch:
+//   - numerical_potential = 1 -> monotonic=1, anti-monotonic=0
+//   - numerical_potential = 0 -> monotonic=0, anti-monotonic=1
+//
+// For custom models, manually edit the two defines below if needed:
+//   - 1/0 -> monotonic potential criterion: evolve while |phi| > |phi_ref|
+//   - 0/1 -> anti-monotonic potential criterion: evolve while |phi| < |phi_ref|
+//   - 0/0 -> generic potential criterion: evolve while V(phi) > V(phi_ref)
 #if numerical_potential
 #define monotonic_potential 1
 #define antimonotonic_potential 0
 #else
 #define monotonic_potential 0
 #define antimonotonic_potential 1
+#endif
+
+#if monotonic_potential && antimonotonic_potential
+#error "Set at most one of monotonic_potential / antimonotonic_potential to 1."
 #endif
 
 // -------------------- Run-time parameters --------------------
@@ -82,6 +97,34 @@ extern double initial_derivative;
 // Comoving box size and main time step (code units).
 extern double L;
 extern double dt;
+
+// Main inflation integrator selection.
+// 0: leapfrog (default, staggered field derivatives)
+// 1: RK4 (fixed-step)
+// 2: RK45 (adaptive-step Dormand-Prince)
+enum IntegratorType {
+    INTEGRATOR_LEAPFROG = 0,
+    INTEGRATOR_RK4 = 1,
+    INTEGRATOR_RK45 = 2
+};
+extern int integrator;
+#if post_inflation
+// Post-inflation integrator selection (same enum values as `integrator`).
+extern int post_inflation_integrator;
+#endif
+#if perform_deltaN
+// deltaN-loop integrator selection (same enum values as `integrator`).
+extern int deltaN_integrator;
+#endif
+
+// RK45 controls (used when either integrator selection is INTEGRATOR_RK45).
+// If rk45_min_dt <= 0, runtime uses 1e-6 * dt.
+// If rk45_max_dt <= 0, runtime uses dt.
+extern double rk45_abs_tol;
+extern double rk45_rel_tol;
+extern double rk45_min_dt;
+extern double rk45_max_dt;
+extern double rk45_safety;
 
 // Output cadences in number of integration steps.
 extern int output_freq;

@@ -241,7 +241,7 @@ An inverse discrete Fourier transform is then applied to obtain the real-space f
 
 \subsection{Time integration and \texorpdfstring{$\delta N$}{deltaN} calculation}
 
-Once the initial conditions are specified, the system evolves under the equations of motion \cref{eq:eoms}. As in \texttt{LATTICEEASY}, we employ a staggered leapfrog integrator—a second-order symplectic scheme in which the field $\phi(\vec{n})$ and its velocity $\partial_{\tilde\tau} \phi(\vec{n})$ are stored at half-step offsets in time. Because this method is standard, we refer the reader to the documentation of \texttt{LATTICEEASY}~\cite{latticeeasy} for details.
+Once the initial conditions are specified, the system evolves under the equations of motion \cref{eq:eoms}. The default option is the same of \texttt{LATTICEEASY}: a second-order symplectic scheme in which the field $\phi(\vec{n})$ and its velocity $\partial_{\tilde\tau} \phi(\vec{n})$ are stored at half-step offsets in time. Because the leapfrog method is standard, we refer the reader to the documentation of \texttt{LATTICEEASY}~\cite{latticeeasy} for details. The code also supports an RK4 integrator and an adaptive RK45 integrator, selectable in \texttt{params.txt}. 
 
 An improvement in \texttt{InflationEasy} is the use of an adaptive timestep. Instead of evolving with a constant $\Delta \tilde{\tau}$, we scale the timestep dynamically as
 \begin{equation}
@@ -261,7 +261,7 @@ To perform this calculation, the time variable is converted to e-folds time, $dN
 \frac{d^2\phi}{dN^2}(\vec{n}) + \left[3 - \frac{1}{2}\left(\frac{d\phi}{dN}(\vec{n})\right)^2 \right]
 \left[ \frac{d\phi}{dN}(\vec{n}) + \frac{V_{,\phi}(\phi)}{V(\phi)}(\vec{n}) \right] = 0.
 \end{align}
-This equation is integrated until each point reaches the reference value $\phi_{\rm ref}$ according to the stopping criterion used by the code. In practice, the implementation uses potential/field-based criteria: for monotonic branches it compares $|\phi|$ to $|\phi_{\rm ref}|$, while for generic potentials it compares $V(\phi)$ to $V(\phi_{\rm ref})$. Accordingly, the automatic choice of $\phi_{\rm ref}$ corresponds to the final-box point minimizing the same criterion (in the generic branch: minimum $V$), rather than explicitly minimizing the full local energy density $K+G+V$. This is expected to be a good approximation when the run ends in a separate-universe, near-attractor regime in which gradients are small and $\dot\phi$ is effectively determined by $\phi$, so constant-$\phi$ slices approximately track constant-energy slices. In non-attractor regimes, this equivalence can break down, and one should test the stability of $\zeta$ against the choice of $\phi_{\rm ref}$ and \texttt{Nend} (or set \texttt{phiref\_manual} explicitly)~\cite{Caravano:2025diq}.
+This equation is integrated until each point reaches the reference value $\phi_{\rm ref}$ according to the stopping criterion used by the code. In practice, the code needs a simple indication of how the potential behaves near the end of the run: monotonic, anti-monotonic, or neither. If this behavior is known, the stopping test can be done with a faster field-based criterion; if not, the code can use a fully generic potential-based criterion. Concretely, the implemented conditions are monotonic potential ($|\phi|>|\phi_{\rm ref}|$ during evolution), anti-monotonic potential ($|\phi|<|\phi_{\rm ref}|$ during evolution), and generic fallback ($V(\phi)>V(\phi_{\rm ref})$ during evolution). Accordingly, the automatic choice of $\phi_{\rm ref}$ corresponds to the final-box point minimizing the same criterion (for the generic potential criterion: minimum $V$), rather than explicitly minimizing the full local energy density $K+G+V$. This is expected to be a good approximation when the run ends in a separate-universe, near-attractor regime in which gradients are small and $\dot\phi$ is effectively determined by $\phi$, so constant-$\phi$ slices approximately track constant-energy slices. In non-attractor regimes, this equivalence can break down, and one should test the stability of $\zeta$ against the choice of $\phi_{\rm ref}$ and \texttt{Nend} (or set \texttt{phiref\_manual} explicitly)~\cite{Caravano:2025diq}.
 
 For further details on the $\delta N$ approach, including the distinction between constant field vs. constant energy hypersurfaces, see \cite{Caravano:2025diq}.
 \subsection{Outputs}
@@ -371,27 +371,28 @@ The code includes two default potential options:
     V(\phi) = V_0 \left(1 - \frac{1-n_s}{2}\frac{\phi^2}{2 M_{\rm Pl}^2}\right).
     \end{equation}
 \end{itemize}
-Switching between these two defaults requires two explicit steps. This separation is intentional: the two scenarios correspond to different physics inputs (tabulated numerical potential versus analytic expression), so they use different code branches and different run-time parameter sets.
-
-\textbf{Step 1 (compile-time choice).} In \texttt{parameters.h}, choose which branch to compile:
-
-\begin{lstlisting}[language=C++, firstnumber=3,caption={},numbers=none]
-// Set to 1 to enable a numerical potential loaded from file, 0 for analytic expression
-#define numerical_potential 1
-\end{lstlisting}
-Because this is a compile-time flag, you must recompile after changing it.
-
-\textbf{Step 2 (run-time parameter set).} Match \texttt{params.txt} to the selected branch. The repository provides two presets: \texttt{params.numerical.txt} and \texttt{params.analytic.txt}. Copy the appropriate one to \texttt{params.txt}:
-\begin{itemize}
-    \item \textbf{Analytic default}: set \texttt{numerical\_potential} to \texttt{0}. Copy \path{params.analytic.txt} to \path{params.txt}, then rebuild.
-    \item \textbf{Numerical default}: set \texttt{numerical\_potential} to \texttt{1}. Copy \path{params.numerical.txt} to \path{params.txt}, then rebuild.
-\end{itemize}
-
 By default, the code runs with the numerical USR potential on a lattice of size $N_{\rm pts}^3 = 128^3$ and runs until the scale factor reaches $a=2N_{\rm pts}=256$ (where $a=1$ at the beginning of the simulation), corresponding to $N = \log(256) \simeq 5.5$ e-folds of evolution. The total number of $e$-folds must be chosen based on the spatial resolution, which ultimately dictates the maximum running time of the simulation. See the next section for how to set the total number of e-folds for a given lattice size.
 
 Running this benchmark code, including the $\delta N$ calculation to compute $\zeta$ from the lattice (but excluding the gravitational-wave calculation of \cref{sec:GW}), on a machine with an Intel(R) Core(TM) i5-1038NG7 CPU @ 2.00\,GHz and 16\,GB RAM, compiled with \texttt{Apple clang 16.0.0}, takes 14 minutes and 20 seconds. Without the $\delta N$ calculation, it takes 8 minutes and 45 seconds. This timing refers to the unparallelized version of the code. If OpenMP is available on your system, you can expect improved performance depending on the number of cores.
 
 In \cref{fig}, we show the outputs of the code for the default example with a USR potential. These plots are generated using the example Python notebook \texttt{{plot.ipynb}} located in the \texttt{{notebooks}} directory. They display lattice outputs such as background quantities $\langle \phi \rangle$ and $\langle \dot{\phi} \rangle$, energy components, the power spectrum of $\zeta$, its 1-point probability distribution function (PDF), and a 2D snapshot of $\zeta$ in real space.
+
+\subsubsection*{Switching}
+Switching between the two defaults requires two explicit steps.
+This split is intentional: the two cases correspond to different physics inputs (tabulated numerical potential versus analytic potential), so they use different code paths and run-time parameter presets. \vspace{0.5mm} \\ 
+\textbf{Step 1 (compile-time choice).} In \texttt{parameters.h}, choose which potential type to compile:
+
+\begin{lstlisting}[language=C++, firstnumber=3,caption={},numbers=none]
+// Set to 1 to enable a numerical potential loaded from file, 0 for analytic expression
+#define numerical_potential 1
+\end{lstlisting}
+Because this is a compile-time flag, you must recompile after changing it. \vspace{0.5mm} \\ 
+\textbf{Step 2 (run-time parameter set).} Match \texttt{params.txt} to the selected potential type. The repository provides two presets: \texttt{params.numerical.txt} and \texttt{params.analytic.txt}. Copy the appropriate one to \texttt{params.txt}:
+\begin{itemize}
+    \item \textbf{Analytic default}: set \texttt{numerical\_potential} to \texttt{0}. Copy \path{params.analytic.txt} to \path{params.txt}, then rebuild.
+    \item \textbf{Numerical default}: set \texttt{numerical\_potential} to \texttt{1}. Copy \path{params.numerical.txt} to \path{params.txt}, then rebuild.
+\end{itemize}
+
 
 \subsection{Configuring a New Potential}
 \label{sec:configuring}
@@ -479,10 +480,10 @@ As part of a convergence test, it is recommended to vary the values of $L$ and $
 Another crucial parameter is the time step for the numerical integration:
 
 \begin{lstlisting}[language=bash,numbers=none]
-dt = 0.0005
+dt = 0.001
 \end{lstlisting}
 
-The time step must be small enough to ensure stability and accuracy. A good practice is to rerun the simulation with different values of \texttt{dt} and check that the results remain unchanged. These convergence tests can be performed, at first, on small grids (e.g., $64^3$) to save time in determining a reasonable range of $dt$ values.
+The time step must be small enough to ensure stability and accuracy. A good practice is to rerun the simulation with different values of \texttt{dt} and check that the results remain unchanged. These convergence tests can be performed, at first, on small grids (e.g., $64^3$) to save time in determining a reasonable range of $dt$ values. If the adaptive RK45 integrator is selected, this fixed \texttt{dt} choice is effectively overridden by the RK45 step-control parameters.
 
 The time step and final time for the $\delta N$ calculation are specified separately:
 \begin{lstlisting}[language=bash,numbers=none]
@@ -491,7 +492,7 @@ Nend = 0.001
 \end{lstlisting}
 Choosing these parameters requires some care. The step size \texttt{dN} must be small enough to resolve the evolution of the separate-universe equation (\cref{eq:eom_deltaN}). As a rule of thumb, it should be much smaller than the expected amplitude of the curvature perturbation, i.e. $\delta N \ll \sqrt{\mathcal{P}_{\zeta}}$. For very small $\mathcal{P}_{\zeta}$, the required step size becomes prohibitively small, and the $\delta N$ calculation is typically unnecessary—nonlinear effects are only important for $\mathcal{P}_{\zeta} \gtrsim 10^{-4}$, as shown in~\cite{Caravano:2025diq}.
 
-The final time \texttt{Nend} should be long enough for all lattice points to reach a common final constant-field hypersurface $\phi_{\rm ref}$. By default, the simulation sets this surface automatically using the same criterion used to stop the separate-universe evolution (for generic potentials: minimum $V$ at the end of the run; for monotonic branches: extremum of $|\phi|$). This choice approximates a uniform-energy final slice when the dynamics is close to an attractor, but it may be problematic in non-attractor regimes or in models with multiple minima/extended plateaus. In such cases, the user can manually define the hypersurface by uncommenting the following line:
+The final time \texttt{Nend} should be long enough for all lattice points to reach a common final constant-field hypersurface $\phi_{\rm ref}$. The stopping logic depends on compile-time flags in \texttt{parameters.h} (\texttt{monotonic\_potential} and \texttt{antimonotonic\_potential}), which specify whether the potential is monotonic, anti-monotonic, or neither in the relevant region. If this behavior is clear, the code can use a faster field-based stopping test. If the potential does not have a clear monotonicity in that region, set both flags to \texttt{0}: the code still handles the evolution correctly using the generic potential-based test, but this check is typically a bit slower. This choice approximates a uniform-energy final slice when the dynamics is close to an attractor, but it may be problematic in non-attractor regimes or in models with multiple minima/extended plateaus. In such cases, the user can manually define the hypersurface by uncommenting the following line:
 \begin{lstlisting}[language=bash,numbers=none]
 use_phiref_manual = 1
 phiref_manual_value = 2.68
