@@ -26,6 +26,17 @@ int find_bracketing_index(double field_value, int start_index) {
         std::exit(1);
     }
 
+    if (start_index <= 1) {
+        int lo = 0;
+        int hi = n - 1;
+        while (hi - lo > 1) {
+            const int mid = lo + (hi - lo) / 2;
+            if (field_numerical[mid] >= field_value) lo = mid;
+            else hi = mid;
+        }
+        return hi;
+    }
+
     int l = std::clamp(start_index, 1, n - 1);
     while (l < n && field_numerical[l] >= field_value) ++l;
     while (l > 1 && field_numerical[l - 1] < field_value) --l;
@@ -100,6 +111,15 @@ double potential_derivative(int i, int j, int k) {
 #endif
 }
 
+double potential_derivative_from_value(double field_value) {
+#if numerical_potential
+    const int l = find_bracketing_index(field_value, 1);
+    return interpolate_from_table(field_value, l, potential_derivative_numerical) / pw2(rescale_B);
+#else
+    return analytic_potential_derivative(field_value);
+#endif
+}
+
 // -------------------------------------------------------------
 // Compute the total potential energy on the grid
 // -------------------------------------------------------------
@@ -143,5 +163,17 @@ double pot_ratio(int i, int j, int k) {
     double pot_deriv = potential_derivative(i, j, k);
 #endif
 
+    return pot_deriv / pot;
+}
+
+double pot_ratio_from_value(double field_value) {
+#if numerical_potential
+    const int l = find_bracketing_index(field_value, 1);
+    const double pot = interpolate_from_table(field_value, l, potential_numerical);
+    const double pot_deriv = interpolate_from_table(field_value, l, potential_derivative_numerical);
+#else
+    const double pot = potential(field_value);
+    const double pot_deriv = potential_derivative_from_value(field_value);
+#endif
     return pot_deriv / pot;
 }

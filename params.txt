@@ -1,11 +1,18 @@
 # Numerical-potential preset (default)
 # Use with: numerical_potential = 1 in src/parameters.h
+# Compile-time settings such as N, numerical_potential, and the deltaN
+# monotonic/antimonotonic potential flags are set in src/parameters.h
+# and require recompilation.
 
+# Random seed
 seed = 8
+
+# Main inflation evolution range/time step
 # Optional: final inflation scale factor. If omitted, defaults to 2*N.
 # af = 256
 dt = 0.001
 
+# Potential normalization and homogeneous initial conditions
 V0 = 3e-9
 # Optional: if omitted, the code sets rescale_B = sqrt(V0)
 # rescale_B = 5.4772255750516614e-05
@@ -13,6 +20,7 @@ initial_field = 2.9181235049318586
 initial_derivative = -0.06727651095116181
 L = 10.0
 
+# Output controls
 output_freq = 500
 output_infrequent_freq = 500
 output_spectra = 1
@@ -28,15 +36,34 @@ high_cutoff_index = 0.0
 low_cutoff_index = 0.0
 forcing_cutoff = 0
 
+# deltaN controls
 dN = 0.0001
-Nend = 5.0
+Nend = 2.0
+# If use_phiref_manual = 0, phiref is set automatically
 use_phiref_manual = 0
 # phiref_manual_value = 2.680654050913246
 output_LOG = 0
 eta_log = -0.5
 
+# Post-inflation controls
 horizon_factor = 1.0
 omega = 0.3333333333333333
 dt_post_inflation = 0.001
 # Optional: final post-inflation scale factor. If omitted, defaults to 2*N.
 # af_post_inflation = 256
+
+# Integrator selection (optional; defaults to leapfrog for all loops if omitted)
+# Accepted values: leapfrog, rk4, rk45
+# inflation_integrator = leapfrog
+# deltaN_integrator = leapfrog
+# post_inflation_integrator = leapfrog
+
+# Legacy alias (main inflation loop only)
+# integrator = leapfrog
+
+# RK45 controls (used only when a loop uses rk45)
+# rk45_abs_tol = 1e-8
+# rk45_rel_tol = 1e-6
+# rk45_min_dt = 1e-9
+# rk45_max_dt = 1e-3
+# rk45_safety = 0.9

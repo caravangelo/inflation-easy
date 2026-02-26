@@ -157,7 +157,9 @@ double potential_energy();
 // Potential interface.
 double potential(double field_value);
 double potential_derivative(int i, int j, int k);
+double potential_derivative_from_value(double field_value);
 double pot_ratio(int i, int j, int k);
+double pot_ratio_from_value(double field_value);
 
 // Output routines.
 void output_parameters();
@@ -169,6 +171,26 @@ void save_post_inflation(int force);
 // Utility helpers.
 void load_vector(const std::string& filename, std::vector<double>& vec);
 bool ensure_results_directory();
+const char* integrator_name();
+#if post_inflation
+const char* post_inflation_integrator_name();
+#endif
+#if perform_deltaN
+const char* deltaN_integrator_name();
+#endif
+inline bool inflation_uses_staggered_derivatives() {
+    return integrator == INTEGRATOR_LEAPFROG;
+}
+#if perform_deltaN
+inline bool deltaN_uses_staggered_derivatives() {
+    return deltaN_integrator == INTEGRATOR_LEAPFROG;
+}
+#endif
+#if post_inflation
+inline bool post_inflation_uses_staggered_derivatives() {
+    return post_inflation_integrator == INTEGRATOR_LEAPFROG;
+}
+#endif
 
 // Main evolution drivers.
 void run_evolution_loop(FILE* output_);

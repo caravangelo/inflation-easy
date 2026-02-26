@@ -105,6 +105,19 @@ cp params.numerical.txt params.txt
 cp params.analytic.txt params.txt
 ```
 
+### Essential Runtime Parameters (Quick Guide)
+
+The most commonly adjusted run-time keys in `params.txt` are:
+
+- `dt`: base inflation time step.
+- `af`: end scale factor for the main inflation loop. If omitted, defaults to `2*N`.
+- `dN`, `Nend`: deltaN loop step/end controls.
+- `dt_post_inflation`, `af_post_inflation`: post-inflation step/end controls (`af_post_inflation` also defaults to `2*N` if omitted).
+- `inflation_integrator`, `deltaN_integrator`, `post_inflation_integrator`: choose `leapfrog`, `rk4`, or `rk45` per loop (all default to `leapfrog` if omitted).
+- `rk45_abs_tol`, `rk45_rel_tol`, `rk45_min_dt`, `rk45_max_dt`, `rk45_safety`: only relevant for loops using `rk45`.
+
+Important: `monotonic_potential` / `antimonotonic_potential` select the compile-time deltaN stopping potential criterion in `src/parameters.h`; they are not `params.txt` keys. The implemented criteria are: monotonic -> evolve while `|phi| > |phi_ref|`, anti-monotonic -> evolve while `|phi| < |phi_ref|`, and if both are `0`, generic potential fallback -> evolve while `V(phi) > V(phi_ref)`.
+
 ### Custom Potentials
 
 To define a custom potential:

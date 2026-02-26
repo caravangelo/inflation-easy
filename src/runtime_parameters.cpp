@@ -72,6 +72,19 @@ double af_post_inflation = 2.0 * N;
 #endif
 #endif
 
+int integrator = INTEGRATOR_LEAPFROG;
+#if perform_deltaN
+int deltaN_integrator = INTEGRATOR_LEAPFROG;
+#endif
+#if post_inflation
+int post_inflation_integrator = INTEGRATOR_LEAPFROG;
+#endif
+double rk45_abs_tol = 1e-8;
+double rk45_rel_tol = 1e-6;
+double rk45_min_dt = -1.0;
+double rk45_max_dt = -1.0;
+double rk45_safety = 0.9;
+
 double high_cutoff_index = 0.0;
 double low_cutoff_index = 0.0;
 int forcing_cutoff = 0;
@@ -124,6 +137,33 @@ bool parse_double(const std::string& s, double& out) {
     out = v;
     return true;
 }
+
+bool parse_integrator(const std::string& raw, int& out) {
+    std::string s = raw;
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+
+    if (s == "leapfrog" || s == "lf") {
+        out = INTEGRATOR_LEAPFROG;
+        return true;
+    }
+    if (s == "rk4") {
+        out = INTEGRATOR_RK4;
+        return true;
+    }
+    if (s == "rk45" || s == "rkf45" || s == "dopri5") {
+        out = INTEGRATOR_RK45;
+        return true;
+    }
+
+    int iv = 0;
+    if (parse_int(s, iv) && iv >= INTEGRATOR_LEAPFROG && iv <= INTEGRATOR_RK45) {
+        out = iv;
+        return true;
+    }
+    return false;
+}
 } // namespace
 
 void load_runtime_parameters(const char* filename) {
@@ -135,12 +175,33 @@ void load_runtime_parameters(const char* filename) {
 #if post_inflation
         af_post_inflation = 2.0 * N;
 #endif
+        if (!(rk45_min_dt > 0.0)) rk45_min_dt = std::abs(dt) * 1e-6;
+        if (!(rk45_max_dt > 0.0)) rk45_max_dt = std::abs(dt);
+        if (rk45_max_dt < rk45_min_dt) rk45_max_dt = rk45_min_dt;
+        if (!(rk45_abs_tol > 0.0)) rk45_abs_tol = 1e-8;
+        if (!(rk45_rel_tol > 0.0)) rk45_rel_tol = 1e-6;
+        if (!(rk45_safety > 0.0 && rk45_safety < 1.0)) rk45_safety = 0.9;
+        if (integrator < INTEGRATOR_LEAPFROG || integrator > INTEGRATOR_RK45) {
+            integrator = INTEGRATOR_LEAPFROG;
+        }
+#if perform_deltaN
+        if (deltaN_integrator < INTEGRATOR_LEAPFROG || deltaN_integrator > INTEGRATOR_RK45) {
+            deltaN_integrator = INTEGRATOR_LEAPFROG;
+        }
+#endif
+#if post_inflation
+        if (post_inflation_integrator < INTEGRATOR_LEAPFROG || post_inflation_integrator > INTEGRATOR_RK45) {
+            post_inflation_integrator = INTEGRATOR_LEAPFROG;
+        }
+#endif
         return;
     }
 
     bool rescale_B_overridden = false;
     bool af_overridden = false;
     bool af_post_overridden = false;
+    bool rk45_min_overridden = false;
+    bool rk45_max_overridden = false;
 
     std::string line;
     int lineno = 0;
@@ -175,6 +236,47 @@ void load_runtime_parameters(const char* filename) {
         else if (key == "initial_derivative" && parse_double(val, dval)) initial_derivative = dval;
         else if (key == "L" && parse_double(val, dval)) L = dval;
         else if (key == "dt" && parse_double(val, dval)) dt = dval;
+        else if (key == "integrator") {
+            int parsed_integrator = INTEGRATOR_LEAPFROG;
+            if (parse_integrator(val, parsed_integrator)) {
+                integrator = parsed_integrator;
+            } else {
+                std::fprintf(stderr, "Ignoring invalid integrator '%s' on line %d.\n", val.c_str(), lineno);
+            }
+        }
+        else if (key == "inflation_integrator") {
+            int parsed_integrator = INTEGRATOR_LEAPFROG;
+            if (parse_integrator(val, parsed_integrator)) {
+                integrator = parsed_integrator;
+            } else {
+                std::fprintf(stderr, "Ignoring invalid inflation_integrator '%s' on line %d.\n", val.c_str(), lineno);
+            }
+        }
+#if perform_deltaN
+        else if (key == "deltaN_integrator") {
+            int parsed_integrator = INTEGRATOR_LEAPFROG;
+            if (parse_integrator(val, parsed_integrator)) {
+                deltaN_integrator = parsed_integrator;
+            } else {
+                std::fprintf(stderr, "Ignoring invalid deltaN_integrator '%s' on line %d.\n", val.c_str(), lineno);
+            }
+        }
+#endif
+#if post_inflation
+        else if (key == "post_inflation_integrator") {
+            int parsed_integrator = INTEGRATOR_LEAPFROG;
+            if (parse_integrator(val, parsed_integrator)) {
+                post_inflation_integrator = parsed_integrator;
+            } else {
+                std::fprintf(stderr, "Ignoring invalid post_inflation_integrator '%s' on line %d.\n", val.c_str(), lineno);
+            }
+        }
+#endif
+        else if (key == "rk45_abs_tol" && parse_double(val, dval)) rk45_abs_tol = dval;
+        else if (key == "rk45_rel_tol" && parse_double(val, dval)) rk45_rel_tol = dval;
+        else if (key == "rk45_min_dt" && parse_double(val, dval)) { rk45_min_dt = dval; rk45_min_overridden = true; }
+        else if (key == "rk45_max_dt" && parse_double(val, dval)) { rk45_max_dt = dval; rk45_max_overridden = true; }
+        else if (key == "rk45_safety" && parse_double(val, dval)) rk45_safety = dval;
         else if (key == "output_freq" && parse_int(val, ival)) output_freq = ival;
         else if (key == "output_infrequent_freq" && parse_int(val, ival)) output_infrequent_freq = ival;
 #if perform_deltaN
@@ -225,4 +327,56 @@ void load_runtime_parameters(const char* filename) {
 #endif
     }
     dx = L / static_cast<double>(N);
+
+    if (!rk45_min_overridden || rk45_min_dt <= 0.0) rk45_min_dt = std::abs(dt) * 1e-6;
+    if (!rk45_max_overridden || rk45_max_dt <= 0.0) rk45_max_dt = std::abs(dt);
+    if (rk45_min_dt <= 0.0) rk45_min_dt = 1e-16;
+    if (rk45_max_dt < rk45_min_dt) rk45_max_dt = rk45_min_dt;
+    if (!(rk45_abs_tol > 0.0)) rk45_abs_tol = 1e-8;
+    if (!(rk45_rel_tol > 0.0)) rk45_rel_tol = 1e-6;
+    if (!(rk45_safety > 0.0 && rk45_safety < 1.0)) rk45_safety = 0.9;
+    if (integrator < INTEGRATOR_LEAPFROG || integrator > INTEGRATOR_RK45) {
+        integrator = INTEGRATOR_LEAPFROG;
+    }
+#if perform_deltaN
+    if (deltaN_integrator < INTEGRATOR_LEAPFROG || deltaN_integrator > INTEGRATOR_RK45) {
+        deltaN_integrator = INTEGRATOR_LEAPFROG;
+    }
+#endif
+#if post_inflation
+    if (post_inflation_integrator < INTEGRATOR_LEAPFROG || post_inflation_integrator > INTEGRATOR_RK45) {
+        post_inflation_integrator = INTEGRATOR_LEAPFROG;
+    }
+#endif
 }
+
+const char* integrator_name() {
+    switch (integrator) {
+        case INTEGRATOR_LEAPFROG: return "leapfrog";
+        case INTEGRATOR_RK4: return "rk4";
+        case INTEGRATOR_RK45: return "rk45";
+        default: return "unknown";
+    }
+}
+
+#if perform_deltaN
+const char* deltaN_integrator_name() {
+    switch (deltaN_integrator) {
+        case INTEGRATOR_LEAPFROG: return "leapfrog";
+        case INTEGRATOR_RK4: return "rk4";
+        case INTEGRATOR_RK45: return "rk45";
+        default: return "unknown";
+    }
+}
+#endif
+
+#if post_inflation
+const char* post_inflation_integrator_name() {
+    switch (post_inflation_integrator) {
+        case INTEGRATOR_LEAPFROG: return "leapfrog";
+        case INTEGRATOR_RK4: return "rk4";
+        case INTEGRATOR_RK45: return "rk45";
+        default: return "unknown";
+    }
+}
+#endif

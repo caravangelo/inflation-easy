@@ -126,6 +126,9 @@ int main() {
     load_numerical_inputs();
 #endif
 
+    // Initialize info.dat at run start; a second call at shutdown appends total runtime.
+    output_parameters();
+
     initialize_simulation();     // Initialize the simulation
     run_evolution_loop(output_); // Run the main evolution loop
 
