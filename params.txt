@@ -58,12 +58,9 @@ dt_post_inflation = 0.001
 # deltaN_integrator = leapfrog
 # post_inflation_integrator = leapfrog
 
-# Legacy alias (main inflation loop only)
-# integrator = leapfrog
-
 # RK45 controls (used only when a loop uses rk45)
-# rk45_abs_tol = 1e-8
-# rk45_rel_tol = 1e-6
+# rk45_abs_tol = 1e-6
+# rk45_rel_tol = 1e-4
 # rk45_min_dt = 1e-9
-# rk45_max_dt = 1e-3
+# rk45_max_dt = 1e-1
 # rk45_safety = 0.9

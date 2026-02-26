@@ -120,6 +120,31 @@ double potential_derivative_from_value(double field_value) {
 #endif
 }
 
+void evaluate_potential_from_value(
+    double field_value,
+    int hint,
+    int lookback,
+    int* next_hint,
+    double& pot,
+    double& pot_deriv)
+{
+#if numerical_potential
+    const int l = find_bracketing_index(field_value, hint);
+    pot = interpolate_from_table(field_value, l, potential_numerical) / pw2(rescale_B);
+    pot_deriv = interpolate_from_table(field_value, l, potential_derivative_numerical) / pw2(rescale_B);
+    if (next_hint) {
+        const int back = std::max(1, lookback);
+        *next_hint = std::max(1, l - back);
+    }
+#else
+    (void)hint;
+    (void)lookback;
+    pot = analytic_potential(field_value);
+    pot_deriv = analytic_potential_derivative(field_value);
+    if (next_hint) *next_hint = 1;
+#endif
+}
+
 // -------------------------------------------------------------
 // Compute the total potential energy on the grid
 // -------------------------------------------------------------

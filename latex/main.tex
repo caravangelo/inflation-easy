@@ -241,7 +241,7 @@ An inverse discrete Fourier transform is then applied to obtain the real-space f
 
 \subsection{Time integration and \texorpdfstring{$\delta N$}{deltaN} calculation}
 
-Once the initial conditions are specified, the system evolves under the equations of motion \cref{eq:eoms}. As in \texttt{LATTICEEASY}, we employ a staggered leapfrog integrator—a second-order symplectic scheme in which the field $\phi(\vec{n})$ and its velocity $\partial_{\tilde\tau} \phi(\vec{n})$ are stored at half-step offsets in time. Because this method is standard, we refer the reader to the documentation of \texttt{LATTICEEASY}~\cite{latticeeasy} for details.
+Once the initial conditions are specified, the system evolves under the equations of motion \cref{eq:eoms}. The default option is the same of \texttt{LATTICEEASY}: a second-order symplectic scheme in which the field $\phi(\vec{n})$ and its velocity $\partial_{\tilde\tau} \phi(\vec{n})$ are stored at half-step offsets in time. Because the leapfrog method is standard, we refer the reader to the documentation of \texttt{LATTICEEASY}~\cite{latticeeasy} for details. The code also supports an RK4 integrator and an adaptive RK45 integrator, selectable in \texttt{params.txt}. 
 
 An improvement in \texttt{InflationEasy} is the use of an adaptive timestep. Instead of evolving with a constant $\Delta \tilde{\tau}$, we scale the timestep dynamically as
 \begin{equation}
@@ -483,7 +483,7 @@ Another crucial parameter is the time step for the numerical integration:
 dt = 0.001
 \end{lstlisting}
 
-The time step must be small enough to ensure stability and accuracy. A good practice is to rerun the simulation with different values of \texttt{dt} and check that the results remain unchanged. These convergence tests can be performed, at first, on small grids (e.g., $64^3$) to save time in determining a reasonable range of $dt$ values.
+The time step must be small enough to ensure stability and accuracy. A good practice is to rerun the simulation with different values of \texttt{dt} and check that the results remain unchanged. These convergence tests can be performed, at first, on small grids (e.g., $64^3$) to save time in determining a reasonable range of $dt$ values. If the adaptive RK45 integrator is selected, this fixed \texttt{dt} choice is effectively overridden by the RK45 step-control parameters.
 
 The time step and final time for the $\delta N$ calculation are specified separately:
 \begin{lstlisting}[language=bash,numbers=none]

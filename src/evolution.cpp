@@ -327,14 +327,23 @@ void compute_inflation_rhs(
             const size_t id = idx(i, j, k);
             const double field_here = f_state[id];
             const double lap_f = lapl<double>(i, j, k, f_state);
+            double pot_here = 0.0;
+            double pot_deriv_here = 0.0;
+#if numerical_potential
+            int next_hint = 1;
+            evaluate_potential_from_value(field_here, lstart[id], int_err, &next_hint, pot_here, pot_deriv_here);
+            lstart[id] = next_hint;
+#else
+            evaluate_potential_from_value(field_here, 1, 1, nullptr, pot_here, pot_deriv_here);
+#endif
 
             dfdt[id] = fd_state[id];
             dfddt[id] = laplnorm * lap_f
                       - friction * fd_state[id]
-                      - potnorm * potential_derivative_from_value(field_here);
+                      - potnorm * pot_deriv_here;
 
             gradient_sum -= field_here * lap_f;
-            potential_sum += potential(field_here);
+            potential_sum += pot_here;
 
 #if calculate_SIGW
             const double gx = dfdx<double>(0, i, j, k, f_state);
@@ -900,7 +909,7 @@ void run_evolution_loop(FILE* output_) {
 
         while (a <= af) {
             const double base_step = dt * std::pow(astep, rescale_s - 1.0);
-            const double hmax = std::min(rk45_max_dt, std::max(rk45_min_dt, base_step));
+            const double hmax = std::min(rk45_max_dt, std::max(rk45_min_dt, 2.0 * base_step));
             h = clamp_rk45_step(h, hmax);
 
             bool accepted = false;
@@ -995,15 +1004,7 @@ struct DeltaNRKScratch {
     }
 };
 
-inline bool deltaN_active_value(double field_value) {
-#if monotonic_potential
-    return std::abs(field_value) > std::abs(phiref);
-#elif antimonotonic_potential
-    return std::abs(field_value) < std::abs(phiref);
-#else
-    return potential(field_value) > potential(phiref);
-#endif
-}
+double g_deltaN_phiref_potential = 0.0;
 
 void compute_deltaN_rhs(
     const std::vector<double>& f_state,
@@ -1022,10 +1023,28 @@ void compute_deltaN_rhs(
         const size_t id = idx(i, j, k);
         const double field_here = f_state[id];
         const double deriv_here = fd_state[id];
+        double pot_here = 0.0;
+        double pot_deriv_here = 0.0;
+#if numerical_potential
+        int next_hint = 1;
+        evaluate_potential_from_value(field_here, lstart[id], int_errN, &next_hint, pot_here, pot_deriv_here);
+        lstart[id] = next_hint;
+#else
+        evaluate_potential_from_value(field_here, 1, 1, nullptr, pot_here, pot_deriv_here);
+#endif
+        const double pot_ratio_here = pot_deriv_here / pot_here;
+        bool is_active = false;
+#if monotonic_potential
+        is_active = std::abs(field_here) > std::abs(phiref);
+#elif antimonotonic_potential
+        is_active = std::abs(field_here) < std::abs(phiref);
+#else
+        is_active = pot_here > g_deltaN_phiref_potential;
+#endif
 
-        dfddt[id] = -(3.0 - 0.5 * pw2(deriv_here)) * (deriv_here + pot_ratio_from_value(field_here));
+        dfddt[id] = -(3.0 - 0.5 * pw2(deriv_here)) * (deriv_here + pot_ratio_here);
 
-        if (deltaN_active_value(field_here)) {
+        if (is_active) {
             dfdt[id] = deriv_here;
             ddNdt[id] = 1.0;
         } else {
@@ -1251,6 +1270,7 @@ void run_deltaN_loop(FILE* output_) {
     }
 
     phiref = use_phiref_manual ? phiref_manual_value : get_phiref();
+    g_deltaN_phiref_potential = potential(phiref);
 
     DeltaNRKScratch rk_scratch;
     rk_scratch.ensure_size(f.size());
@@ -1283,7 +1303,7 @@ void run_deltaN_loop(FILE* output_) {
         double h = clamp_rk45_step(dN, rk45_max_dt);
 
         while (Ne <= Nend) {
-            const double hmax = std::min(rk45_max_dt, std::max(rk45_min_dt, dN));
+            const double hmax = std::min(rk45_max_dt, std::max(rk45_min_dt, 2.0 * dN));
             h = clamp_rk45_step(h, hmax);
 
             bool accepted = false;
@@ -1572,7 +1592,7 @@ void run_post_inflation_loop(FILE* output_) {
         double h = clamp_rk45_step(dt_post_inflation, rk45_max_dt);
 
         while (a <= af_post_inflation) {
-            const double hmax = std::min(rk45_max_dt, std::max(rk45_min_dt, dt_post_inflation));
+            const double hmax = std::min(rk45_max_dt, std::max(rk45_min_dt, 2.0 * dt_post_inflation));
             h = clamp_rk45_step(h, hmax);
 
             bool accepted = false;

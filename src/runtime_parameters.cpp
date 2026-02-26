@@ -236,14 +236,6 @@ void load_runtime_parameters(const char* filename) {
         else if (key == "initial_derivative" && parse_double(val, dval)) initial_derivative = dval;
         else if (key == "L" && parse_double(val, dval)) L = dval;
         else if (key == "dt" && parse_double(val, dval)) dt = dval;
-        else if (key == "integrator") {
-            int parsed_integrator = INTEGRATOR_LEAPFROG;
-            if (parse_integrator(val, parsed_integrator)) {
-                integrator = parsed_integrator;
-            } else {
-                std::fprintf(stderr, "Ignoring invalid integrator '%s' on line %d.\n", val.c_str(), lineno);
-            }
-        }
         else if (key == "inflation_integrator") {
             int parsed_integrator = INTEGRATOR_LEAPFROG;
             if (parse_integrator(val, parsed_integrator)) {

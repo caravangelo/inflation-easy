@@ -158,6 +158,7 @@ double potential_energy();
 double potential(double field_value);
 double potential_derivative(int i, int j, int k);
 double potential_derivative_from_value(double field_value);
+void evaluate_potential_from_value(double field_value, int hint, int lookback, int* next_hint, double& pot, double& pot_deriv);
 double pot_ratio(int i, int j, int k);
 double pot_ratio_from_value(double field_value);
 
