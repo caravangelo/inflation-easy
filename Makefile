@@ -29,7 +29,7 @@ else
   endif
 endif
 
-.PHONY: all clean
+.PHONY: all clean dev-regression-main-n16
 
 all: $(TARGET)
 
@@ -44,3 +44,7 @@ $(TARGET): $(OBJS)
 clean:
 	@echo "Cleaning build files..."
 	@rm -f $(OBJS) $(TARGET)
+
+# Maintainer-only regression check: compare HEAD vs main at N=16.
+dev-regression-main-n16:
+	python3 tests/regression_main_n16.py --repo . --main-ref main --params params.numerical.txt
