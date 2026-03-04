@@ -1,7 +1,9 @@
 CXX      = c++
-CXXFLAGS = -std=c++17 -O3 -Wall
+CXXFLAGS = -std=c++17 -O3 -DNDEBUG -Wall
 LDFLAGS  =
 LIBS     = -lm
+ENABLE_NATIVE ?= 0
+ENABLE_LTO    ?= 0
 
 SRC_DIR = src
 SRCS    = $(wildcard $(SRC_DIR)/*.cpp)
@@ -27,6 +29,15 @@ else
     CXXFLAGS += -fopenmp
     LIBS     += -fopenmp
   endif
+endif
+
+ifeq ($(ENABLE_NATIVE),1)
+  CXXFLAGS += -march=native -mtune=native
+endif
+
+ifeq ($(ENABLE_LTO),1)
+  CXXFLAGS += -flto
+  LDFLAGS  += -flto
 endif
 
 .PHONY: all clean dev-regression-main-n16

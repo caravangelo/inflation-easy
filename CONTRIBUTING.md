@@ -25,6 +25,7 @@ make
 - Preserve physical conventions and output formats unless a change is explicitly intended.
 - Update documentation when behavior, parameters, or outputs change.
 - Include a short validation note describing what was run and what changed.
+- For evolution/integrator edits, run `python3 tests/regression_main_n16.py --repo . --main-ref main --params params.numerical.txt --integrators leapfrog,rk45` and summarize the result.
 
 ## Style
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Regression test: current branch vs main at N=16 (leapfrog).
+Regression test: current branch vs main at N=16 for selected integrators.
 
 Runs both revisions in isolated temp directories under /tmp, using identical
-runtime parameters, then compares numeric output files.
+runtime parameters per integrator mode, then compares numeric output files.
 """
 
 from __future__ import annotations
@@ -76,7 +76,36 @@ def patch_n_to_16(parameters_h: Path) -> None:
     parameters_h.write_text(txt_new)
 
 
-def write_test_params(work: Path, source_params: Path) -> None:
+def canonical_integrator_name(raw: str) -> str:
+    s = raw.strip().lower()
+    aliases = {
+        "lf": "leapfrog",
+        "leapfrog": "leapfrog",
+        "rk4": "rk4",
+        "rk45": "rk45",
+        "rkf45": "rk45",
+        "dopri5": "rk45",
+    }
+    if s not in aliases:
+        raise ValueError(f"Unknown integrator '{raw}'")
+    return aliases[s]
+
+
+def parse_integrator_list(raw: str) -> list[str]:
+    items = [x for x in (part.strip() for part in raw.split(",")) if x]
+    if not items:
+        raise ValueError("At least one integrator must be provided")
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        name = canonical_integrator_name(item)
+        if name not in seen:
+            seen.add(name)
+            ordered.append(name)
+    return ordered
+
+
+def write_test_params(work: Path, source_params: Path, integrator: str) -> None:
     txt = source_params.read_text()
     # Strip any explicit per-loop integrator keys so we can enforce below.
     txt = re.sub(
@@ -87,9 +116,9 @@ def write_test_params(work: Path, source_params: Path) -> None:
     )
     txt += (
         "\n"
-        "inflation_integrator = leapfrog\n"
-        "deltaN_integrator = leapfrog\n"
-        "post_inflation_integrator = leapfrog\n"
+        f"inflation_integrator = {integrator}\n"
+        f"deltaN_integrator = {integrator}\n"
+        f"post_inflation_integrator = {integrator}\n"
     )
     (work / "params.txt").write_text(txt)
 
@@ -138,6 +167,11 @@ def main() -> int:
     ap.add_argument("--repo", default=".", help="Path to git repo")
     ap.add_argument("--main-ref", default="main", help="Reference branch/tag to compare against")
     ap.add_argument("--params", default="params.numerical.txt", help="Runtime params template from repo root")
+    ap.add_argument(
+        "--integrators",
+        default="leapfrog,rk45",
+        help="Comma-separated integrators to test (e.g. leapfrog,rk45,rk4)",
+    )
     ap.add_argument("--rtol", type=float, default=1e-10)
     ap.add_argument("--atol", type=float, default=1e-12)
     args = ap.parse_args()
@@ -150,32 +184,46 @@ def main() -> int:
         print(f"Missing params template: {params_src}", file=sys.stderr)
         return 2
 
+    try:
+        integrators = parse_integrator_list(args.integrators)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
     with tempfile.TemporaryDirectory(prefix="ie-reg-main-n16-", dir="/tmp") as td:
         root = Path(td)
-        work_head = root / "head"
-        work_main = root / "main"
+        all_failures: list[str] = []
 
-        export_git_ref(repo, "HEAD", work_head)
-        export_git_ref(repo, args.main_ref, work_main)
+        for integrator in integrators:
+            work_head = root / f"head_{integrator}"
+            work_main = root / f"main_{integrator}"
 
-        patch_n_to_16(work_head / "src" / "parameters.h")
-        patch_n_to_16(work_main / "src" / "parameters.h")
+            export_git_ref(repo, "HEAD", work_head)
+            export_git_ref(repo, args.main_ref, work_main)
 
-        write_test_params(work_head, params_src)
-        write_test_params(work_main, params_src)
+            patch_n_to_16(work_head / "src" / "parameters.h")
+            patch_n_to_16(work_main / "src" / "parameters.h")
 
-        build_and_run(work_head, inputs_dir)
-        build_and_run(work_main, inputs_dir)
+            write_test_params(work_head, params_src, integrator)
+            write_test_params(work_main, params_src, integrator)
 
-        failures = compare_results(work_head, work_main, rtol=args.rtol, atol=args.atol)
-        if failures:
+            build_and_run(work_head, inputs_dir)
+            build_and_run(work_main, inputs_dir)
+
+            failures = compare_results(work_head, work_main, rtol=args.rtol, atol=args.atol)
+            if failures:
+                all_failures.extend([f"[{integrator}] {msg}" for msg in failures])
+            else:
+                print(f"PASS: [{integrator}] current branch reproduces {args.main_ref} at N=16.")
+
+        if all_failures:
             print("Regression mismatch vs main at N=16:")
-            for f in failures:
+            for f in all_failures:
                 print(f" - {f}")
             print(f"Temp artifacts kept at: {root}")
             return 1
 
-        print("PASS: current branch reproduces main numerically at N=16 (leapfrog, same params).")
+        print(f"PASS: all requested integrators matched ({', '.join(integrators)}).")
         return 0
 
 

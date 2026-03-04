@@ -164,6 +164,32 @@ bool parse_integrator(const std::string& raw, int& out) {
     }
     return false;
 }
+
+void sanitize_integrator_choice(int& value) {
+    if (value < INTEGRATOR_LEAPFROG || value > INTEGRATOR_RK45) {
+        value = INTEGRATOR_LEAPFROG;
+    }
+}
+
+void sanitize_all_integrator_choices() {
+    sanitize_integrator_choice(integrator);
+#if perform_deltaN
+    sanitize_integrator_choice(deltaN_integrator);
+#endif
+#if post_inflation
+    sanitize_integrator_choice(post_inflation_integrator);
+#endif
+}
+
+void sanitize_rk45_controls() {
+    if (!(rk45_min_dt > 0.0)) rk45_min_dt = std::abs(dt) * 1e-6;
+    if (!(rk45_max_dt > 0.0)) rk45_max_dt = std::abs(dt);
+    if (rk45_min_dt <= 0.0) rk45_min_dt = 1e-16;
+    if (rk45_max_dt < rk45_min_dt) rk45_max_dt = rk45_min_dt;
+    if (!(rk45_abs_tol > 0.0)) rk45_abs_tol = 1e-8;
+    if (!(rk45_rel_tol > 0.0)) rk45_rel_tol = 1e-6;
+    if (!(rk45_safety > 0.0 && rk45_safety < 1.0)) rk45_safety = 0.9;
+}
 } // namespace
 
 void load_runtime_parameters(const char* filename) {
@@ -175,25 +201,8 @@ void load_runtime_parameters(const char* filename) {
 #if post_inflation
         af_post_inflation = 2.0 * N;
 #endif
-        if (!(rk45_min_dt > 0.0)) rk45_min_dt = std::abs(dt) * 1e-6;
-        if (!(rk45_max_dt > 0.0)) rk45_max_dt = std::abs(dt);
-        if (rk45_max_dt < rk45_min_dt) rk45_max_dt = rk45_min_dt;
-        if (!(rk45_abs_tol > 0.0)) rk45_abs_tol = 1e-8;
-        if (!(rk45_rel_tol > 0.0)) rk45_rel_tol = 1e-6;
-        if (!(rk45_safety > 0.0 && rk45_safety < 1.0)) rk45_safety = 0.9;
-        if (integrator < INTEGRATOR_LEAPFROG || integrator > INTEGRATOR_RK45) {
-            integrator = INTEGRATOR_LEAPFROG;
-        }
-#if perform_deltaN
-        if (deltaN_integrator < INTEGRATOR_LEAPFROG || deltaN_integrator > INTEGRATOR_RK45) {
-            deltaN_integrator = INTEGRATOR_LEAPFROG;
-        }
-#endif
-#if post_inflation
-        if (post_inflation_integrator < INTEGRATOR_LEAPFROG || post_inflation_integrator > INTEGRATOR_RK45) {
-            post_inflation_integrator = INTEGRATOR_LEAPFROG;
-        }
-#endif
+        sanitize_rk45_controls();
+        sanitize_all_integrator_choices();
         return;
     }
 
@@ -322,24 +331,8 @@ void load_runtime_parameters(const char* filename) {
 
     if (!rk45_min_overridden || rk45_min_dt <= 0.0) rk45_min_dt = std::abs(dt) * 1e-6;
     if (!rk45_max_overridden || rk45_max_dt <= 0.0) rk45_max_dt = std::abs(dt);
-    if (rk45_min_dt <= 0.0) rk45_min_dt = 1e-16;
-    if (rk45_max_dt < rk45_min_dt) rk45_max_dt = rk45_min_dt;
-    if (!(rk45_abs_tol > 0.0)) rk45_abs_tol = 1e-8;
-    if (!(rk45_rel_tol > 0.0)) rk45_rel_tol = 1e-6;
-    if (!(rk45_safety > 0.0 && rk45_safety < 1.0)) rk45_safety = 0.9;
-    if (integrator < INTEGRATOR_LEAPFROG || integrator > INTEGRATOR_RK45) {
-        integrator = INTEGRATOR_LEAPFROG;
-    }
-#if perform_deltaN
-    if (deltaN_integrator < INTEGRATOR_LEAPFROG || deltaN_integrator > INTEGRATOR_RK45) {
-        deltaN_integrator = INTEGRATOR_LEAPFROG;
-    }
-#endif
-#if post_inflation
-    if (post_inflation_integrator < INTEGRATOR_LEAPFROG || post_inflation_integrator > INTEGRATOR_RK45) {
-        post_inflation_integrator = INTEGRATOR_LEAPFROG;
-    }
-#endif
+    sanitize_rk45_controls();
+    sanitize_all_integrator_choices();
 }
 
 const char* integrator_name() {

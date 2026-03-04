@@ -7,16 +7,53 @@
 
 #include "main.h"
 
+// High-level flow in this module:
+// 1) Inflation loop (integrator selectable: leapfrog, RK4, RK45).
+// 2) Optional deltaN loop (own selectable integrator, same RK back-end pattern).
+// 3) Optional post-inflation loop (reuses inflation RK back-end with alternate RHS).
+//
+// Numerical invariants to preserve when editing:
+// - Periodic finite-difference stencils on all spatial derivatives.
+// - Leapfrog staggering semantics (state/derivative half-step offsets).
+// - RK45 acceptance based on weighted RMS norm with abs/rel tolerances.
+// - Output formats and file names consumed by downstream analysis scripts.
+
+namespace {
+// Precomputed periodic neighbors (i+1 mod N, i-1 mod N), reused in hot stencils.
+std::vector<int> g_periodic_inc;
+std::vector<int> g_periodic_dec;
+
+inline void ensure_periodic_index_cache() {
+    if (static_cast<int>(g_periodic_inc.size()) == N &&
+        static_cast<int>(g_periodic_dec.size()) == N) {
+        return;
+    }
+
+    g_periodic_inc.resize(N);
+    g_periodic_dec.resize(N);
+    for (int i = 0; i < N; ++i) {
+        g_periodic_inc[i] = (i == N - 1) ? 0 : i + 1;
+        g_periodic_dec[i] = (i == 0) ? N - 1 : i - 1;
+    }
+}
+} // namespace
+
 // -------------------- Laplacians --------------------
 
 // Helper for periodic indexing
 inline int INCREMENT(int i) {
-    return (i == N - 1) ? 0 : i + 1;
+    if (static_cast<int>(g_periodic_inc.size()) != N) {
+        ensure_periodic_index_cache();
+    }
+    return g_periodic_inc[i];
 }
 
 // Decrement index with periodic wrapping (i → i-1 mod N)
 inline int DECREMENT(int i) {
-    return (i == 0) ? N - 1 : i - 1;
+    if (static_cast<int>(g_periodic_dec.size()) != N) {
+        ensure_periodic_index_cache();
+    }
+    return g_periodic_dec[i];
 }
 
 // Laplacian for real-space arrays (works for double or float vectors)
@@ -63,6 +100,35 @@ inline T dfdx(int dim, int i, int j, int k, const std::vector<T>& field) {
             return T( (field[idx(i, j, k+1)] - field[idx(i, j, k-1)]) * half_over_dx );
         }
     }
+}
+
+inline double d2_same_state(int dim, int i, int j, int k, size_t id, const std::vector<double>& field) {
+    const int ip = (dim == 0) ? INCREMENT(i) : i;
+    const int im = (dim == 0) ? DECREMENT(i) : i;
+    const int jp = (dim == 1) ? INCREMENT(j) : j;
+    const int jm = (dim == 1) ? DECREMENT(j) : j;
+    const int kp = (dim == 2) ? INCREMENT(k) : k;
+    const int km = (dim == 2) ? DECREMENT(k) : k;
+    const double inv_dx2 = 1.0 / (dx * dx);
+
+    if (dim == 0) return (field[idx(ip, j,  k)] - 2.0 * field[id] + field[idx(im, j,  k)]) * inv_dx2;
+    if (dim == 1) return (field[idx(i,  jp, k)] - 2.0 * field[id] + field[idx(i,  jm, k)]) * inv_dx2;
+    return             (field[idx(i,  j,  kp)] - 2.0 * field[id] + field[idx(i,  j,  km)]) * inv_dx2;
+}
+
+inline double d2_cross_state(int d1, int d2, int i, int j, int k, const std::vector<double>& field) {
+    const int ip = (d1 == 0 || d2 == 0) ? INCREMENT(i) : i;
+    const int im = (d1 == 0 || d2 == 0) ? DECREMENT(i) : i;
+    const int jp = (d1 == 1 || d2 == 1) ? INCREMENT(j) : j;
+    const int jm = (d1 == 1 || d2 == 1) ? DECREMENT(j) : j;
+    const int kp = (d1 == 2 || d2 == 2) ? INCREMENT(k) : k;
+    const int km = (d1 == 2 || d2 == 2) ? DECREMENT(k) : k;
+
+    const double fpp = field[idx(ip, jp, kp)];
+    const double fpm = field[idx(ip, jm, km)];
+    const double fmp = field[idx(im, jp, kp)];
+    const double fmm = field[idx(im, jm, km)];
+    return (fpp - fpm - fmp + fmm) / (4.0 * dx * dx);
 }
 
 // -------------------- Stress-energy tensor (inflaton) --------------------
@@ -244,6 +310,7 @@ void evolve_fields(double d) {
 }
 
 namespace {
+// Reused stage/state buffers for RK methods to avoid per-step allocations.
 struct InflationRKScratch {
     std::vector<double> ftmp;
     std::vector<double> fdtmp;
@@ -279,6 +346,8 @@ struct InflationRKScratch {
     }
 };
 
+// Selected at runtime via a scoped guard in post-inflation loops.
+// false: inflation equations, true: post-inflation equations.
 bool g_use_post_inflation_rhs = false;
 
 double clamp_rk45_step(double h, double hmax) {
@@ -289,6 +358,90 @@ double clamp_rk45_step(double h, double hmax) {
     return h;
 }
 
+constexpr int RK45_MAX_ATTEMPTS = 25;
+constexpr double RK45_MIN_STEP_GUARD = 1.0 + 1e-12;
+
+inline double inflation_rescaled_step(double astep_value) {
+    return dt * std::pow(astep_value, rescale_s - 1.0);
+}
+
+inline double rk45_hmax_from_base_step(double base_step) {
+    return std::min(rk45_max_dt, std::max(rk45_min_dt, 2.0 * base_step));
+}
+
+template <typename StepFunction, typename FailureHandler>
+double rk45_accept_step(double h, double hmax, StepFunction&& step_function, FailureHandler&& failure_handler) {
+    // Generic adaptive-step accept/reject driver shared by inflation/deltaN/post-inflation.
+    bool accepted = false;
+    int attempts = 0;
+    while (!accepted) {
+        double h_suggested = h;
+        accepted = step_function(h, hmax, h_suggested);
+        h = h_suggested;
+        ++attempts;
+
+        if (!accepted && (attempts > RK45_MAX_ATTEMPTS || h <= rk45_min_dt * RK45_MIN_STEP_GUARD)) {
+            failure_handler(attempts, h);
+        }
+    }
+    return h;
+}
+
+struct ScopedPostInflationRhsMode {
+    explicit ScopedPostInflationRhsMode(bool enabled) {
+        g_use_post_inflation_rhs = enabled;
+    }
+    ~ScopedPostInflationRhsMode() {
+        g_use_post_inflation_rhs = false;
+    }
+};
+
+struct DormandPrince45Coefficients {
+    static constexpr double a21 = 1.0 / 5.0;
+    static constexpr double a31 = 3.0 / 40.0;
+    static constexpr double a32 = 9.0 / 40.0;
+    static constexpr double a41 = 44.0 / 45.0;
+    static constexpr double a42 = -56.0 / 15.0;
+    static constexpr double a43 = 32.0 / 9.0;
+    static constexpr double a51 = 19372.0 / 6561.0;
+    static constexpr double a52 = -25360.0 / 2187.0;
+    static constexpr double a53 = 64448.0 / 6561.0;
+    static constexpr double a54 = -212.0 / 729.0;
+    static constexpr double a61 = 9017.0 / 3168.0;
+    static constexpr double a62 = -355.0 / 33.0;
+    static constexpr double a63 = 46732.0 / 5247.0;
+    static constexpr double a64 = 49.0 / 176.0;
+    static constexpr double a65 = -5103.0 / 18656.0;
+    static constexpr double a71 = 35.0 / 384.0;
+    static constexpr double a73 = 500.0 / 1113.0;
+    static constexpr double a74 = 125.0 / 192.0;
+    static constexpr double a75 = -2187.0 / 6784.0;
+    static constexpr double a76 = 11.0 / 84.0;
+
+    static constexpr double b1 = 35.0 / 384.0;
+    static constexpr double b3 = 500.0 / 1113.0;
+    static constexpr double b4 = 125.0 / 192.0;
+    static constexpr double b5 = -2187.0 / 6784.0;
+    static constexpr double b6 = 11.0 / 84.0;
+
+    static constexpr double bs1 = 5179.0 / 57600.0;
+    static constexpr double bs3 = 7571.0 / 16695.0;
+    static constexpr double bs4 = 393.0 / 640.0;
+    static constexpr double bs5 = -92097.0 / 339200.0;
+    static constexpr double bs6 = 187.0 / 2100.0;
+    static constexpr double bs7 = 1.0 / 40.0;
+
+    static constexpr double e1 = b1 - bs1;
+    static constexpr double e3 = b3 - bs3;
+    static constexpr double e4 = b4 - bs4;
+    static constexpr double e5 = b5 - bs5;
+    static constexpr double e6 = b6 - bs6;
+    static constexpr double e7 = -bs7;
+};
+
+// Compute RHS for the coupled system (field, optional tensors, background).
+// Inputs are read-only state snapshots; outputs are time derivatives at that state.
+// Note: in numerical-potential mode, lstart[] is updated as a search hint cache.
 void compute_inflation_rhs(
     const std::vector<double>& f_state,
     const std::vector<double>& fd_state,
@@ -419,40 +572,12 @@ void compute_inflation_rhs(
         const double gfdy = dfdx<double>(1, i, j, k, fd_state);
         const double gfdz = dfdx<double>(2, i, j, k, fd_state);
 
-        auto d2_same_state = [&](int dim) {
-            int ip = (dim==0? ((i==N-1)? (int)INCREMENT(i) : i+1) : i);
-            int im = (dim==0? ((i==0)  ? (int)DECREMENT(i) : i-1) : i);
-            int jp = (dim==1? ((j==N-1)? (int)INCREMENT(j) : j+1) : j);
-            int jm = (dim==1? ((j==0)  ? (int)DECREMENT(j) : j-1) : j);
-            int kp = (dim==2? ((k==N-1)? (int)INCREMENT(k) : k+1) : k);
-            int km = (dim==2? ((k==0)  ? (int)DECREMENT(k) : k-1) : k);
-
-            if (dim==0) return (f_state[idx(ip,j,k)] - 2.0*f_state[id] + f_state[idx(im,j,k)])/(dx*dx);
-            if (dim==1) return (f_state[idx(i,jp,k)] - 2.0*f_state[id] + f_state[idx(i,jm,k)])/(dx*dx);
-            return         (f_state[idx(i,j,kp)] - 2.0*f_state[id] + f_state[idx(i,j,km)])/(dx*dx);
-        };
-
-        auto d2_cross_state = [&](int d1, int d2) {
-            int ip = ((d1==0||d2==0)? ((i==N-1)? (int)INCREMENT(i) : i+1) : i);
-            int im = ((d1==0||d2==0)? ((i==0)  ? (int)DECREMENT(i) : i-1) : i);
-            int jp = ((d1==1||d2==1)? ((j==N-1)? (int)INCREMENT(j) : j+1) : j);
-            int jm = ((d1==1||d2==1)? ((j==0)  ? (int)DECREMENT(j) : j-1) : j);
-            int kp = ((d1==2||d2==2)? ((k==N-1)? (int)INCREMENT(k) : k+1) : k);
-            int km = ((d1==2||d2==2)? ((k==0)  ? (int)DECREMENT(k) : k-1) : k);
-
-            const double fpp = f_state[idx(ip,jp,kp)];
-            const double fpm = f_state[idx(ip,jm,km)];
-            const double fmp = f_state[idx(im,jp,kp)];
-            const double fmm = f_state[idx(im,jm,km)];
-            return (fpp - fpm - fmp + fmm) / (4.0*dx*dx);
-        };
-
-        const double Hxx = d2_same_state(0);
-        const double Hyy = d2_same_state(1);
-        const double Hzz = d2_same_state(2);
-        const double Hxy = d2_cross_state(0,1);
-        const double Hxz = d2_cross_state(0,2);
-        const double Hyz = d2_cross_state(1,2);
+        const double Hxx = d2_same_state(0, i, j, k, id, f_state);
+        const double Hyy = d2_same_state(1, i, j, k, id, f_state);
+        const double Hzz = d2_same_state(2, i, j, k, id, f_state);
+        const double Hxy = d2_cross_state(0, 1, i, j, k, f_state);
+        const double Hxz = d2_cross_state(0, 2, i, j, k, f_state);
+        const double Hyz = d2_cross_state(1, 2, i, j, k, f_state);
 
         const double dux = gfdx * invH + gx;
         const double duy = gfdy * invH + gy;
@@ -493,117 +618,178 @@ void compute_inflation_rhs(
 #endif
 }
 
-void rk4_step_inflation(double h, InflationRKScratch& scratch) {
-    const size_t gs = f.size();
-    scratch.ensure_size(gs);
+static constexpr double RK4_A[4][4] = {
+    {0.0, 0.0, 0.0, 0.0},
+    {0.5, 0.0, 0.0, 0.0},
+    {0.0, 0.5, 0.0, 0.0},
+    {0.0, 0.0, 1.0, 0.0}
+};
 
-    double ka[4], kad[4];
+static constexpr double RK4_B[4] = {
+    1.0 / 6.0,
+    1.0 / 3.0,
+    1.0 / 3.0,
+    1.0 / 6.0
+};
 
-#if calculate_SIGW
-    compute_inflation_rhs(f, fd, hij, hijd, scratch.kf[0], scratch.kfd[0], scratch.kh[0], scratch.khd[0], a, ad, ka[0], kad[0]);
-#else
-    compute_inflation_rhs(f, fd, scratch.kf[0], scratch.kfd[0], a, ad, ka[0], kad[0]);
-#endif
+static constexpr double DP_A[7][7] = {
+    {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+    {DormandPrince45Coefficients::a21, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+    {DormandPrince45Coefficients::a31, DormandPrince45Coefficients::a32, 0.0, 0.0, 0.0, 0.0, 0.0},
+    {DormandPrince45Coefficients::a41, DormandPrince45Coefficients::a42, DormandPrince45Coefficients::a43, 0.0, 0.0, 0.0, 0.0},
+    {DormandPrince45Coefficients::a51, DormandPrince45Coefficients::a52, DormandPrince45Coefficients::a53, DormandPrince45Coefficients::a54, 0.0, 0.0, 0.0},
+    {DormandPrince45Coefficients::a61, DormandPrince45Coefficients::a62, DormandPrince45Coefficients::a63, DormandPrince45Coefficients::a64, DormandPrince45Coefficients::a65, 0.0, 0.0},
+    {DormandPrince45Coefficients::a71, 0.0, DormandPrince45Coefficients::a73, DormandPrince45Coefficients::a74, DormandPrince45Coefficients::a75, DormandPrince45Coefficients::a76, 0.0}
+};
 
+static constexpr double DP_B[7] = {
+    DormandPrince45Coefficients::b1,
+    0.0,
+    DormandPrince45Coefficients::b3,
+    DormandPrince45Coefficients::b4,
+    DormandPrince45Coefficients::b5,
+    DormandPrince45Coefficients::b6,
+    0.0
+};
+
+static constexpr double DP_E[7] = {
+    DormandPrince45Coefficients::e1,
+    0.0,
+    DormandPrince45Coefficients::e3,
+    DormandPrince45Coefficients::e4,
+    DormandPrince45Coefficients::e5,
+    DormandPrince45Coefficients::e6,
+    DormandPrince45Coefficients::e7
+};
+
+template <int StageCount>
+void prepare_inflation_stage_state(double h, int stage, const double (&A)[StageCount][StageCount], InflationRKScratch& scratch, size_t gs) {
     for (size_t id = 0; id < gs; ++id) {
-        scratch.ftmp[id] = f[id] + 0.5 * h * scratch.kf[0][id];
-        scratch.fdtmp[id] = fd[id] + 0.5 * h * scratch.kfd[0][id];
+        double sum_f = 0.0;
+        double sum_fd = 0.0;
+        for (int s = 0; s < stage; ++s) {
+            const double c = A[stage][s];
+            if (c == 0.0) continue;
+            sum_f += c * scratch.kf[s][id];
+            sum_fd += c * scratch.kfd[s][id];
+        }
+        scratch.ftmp[id] = f[id] + h * sum_f;
+        scratch.fdtmp[id] = fd[id] + h * sum_fd;
     }
 #if calculate_SIGW
     for (int c = 0; c < 6; ++c) {
         for (size_t id = 0; id < gs; ++id) {
-            scratch.htmp[c][id] = static_cast<float>(hij[c][id] + 0.5 * h * static_cast<double>(scratch.kh[0][c][id]));
-            scratch.hdtmp[c][id] = static_cast<float>(hijd[c][id] + 0.5 * h * static_cast<double>(scratch.khd[0][c][id]));
+            double sum_h = 0.0;
+            double sum_hd = 0.0;
+            for (int s = 0; s < stage; ++s) {
+                const double cs = A[stage][s];
+                if (cs == 0.0) continue;
+                sum_h += cs * static_cast<double>(scratch.kh[s][c][id]);
+                sum_hd += cs * static_cast<double>(scratch.khd[s][c][id]);
+            }
+            scratch.htmp[c][id] = static_cast<float>(static_cast<double>(hij[c][id]) + h * sum_h);
+            scratch.hdtmp[c][id] = static_cast<float>(static_cast<double>(hijd[c][id]) + h * sum_hd);
         }
     }
-    compute_inflation_rhs(scratch.ftmp, scratch.fdtmp, scratch.htmp, scratch.hdtmp, scratch.kf[1], scratch.kfd[1], scratch.kh[1], scratch.khd[1],
-        a + 0.5 * h * ka[0], ad + 0.5 * h * kad[0], ka[1], kad[1]);
-#else
-    compute_inflation_rhs(scratch.ftmp, scratch.fdtmp, scratch.kf[1], scratch.kfd[1],
-        a + 0.5 * h * ka[0], ad + 0.5 * h * kad[0], ka[1], kad[1]);
 #endif
+}
 
+template <int StageCount>
+void prepare_inflation_background_state(
+    double h,
+    int stage,
+    const double (&A)[StageCount][StageCount],
+    const double (&ka)[StageCount],
+    const double (&kad)[StageCount],
+    double& a_stage,
+    double& ad_stage) {
+    a_stage = a;
+    ad_stage = ad;
+    for (int s = 0; s < stage; ++s) {
+        const double c = A[stage][s];
+        if (c == 0.0) continue;
+        a_stage += h * c * ka[s];
+        ad_stage += h * c * kad[s];
+    }
+}
+
+template <int StageCount>
+void evaluate_inflation_stage(
+    double h,
+    int stage,
+    const double (&A)[StageCount][StageCount],
+    InflationRKScratch& scratch,
+    size_t gs,
+    double (&ka)[StageCount],
+    double (&kad)[StageCount]) {
+    prepare_inflation_stage_state(h, stage, A, scratch, gs);
+    double a_stage = a;
+    double ad_stage = ad;
+    prepare_inflation_background_state(h, stage, A, ka, kad, a_stage, ad_stage);
+#if calculate_SIGW
+    compute_inflation_rhs(
+        scratch.ftmp, scratch.fdtmp, scratch.htmp, scratch.hdtmp,
+        scratch.kf[stage], scratch.kfd[stage], scratch.kh[stage], scratch.khd[stage],
+        a_stage, ad_stage, ka[stage], kad[stage]);
+#else
+    compute_inflation_rhs(
+        scratch.ftmp, scratch.fdtmp, scratch.kf[stage], scratch.kfd[stage],
+        a_stage, ad_stage, ka[stage], kad[stage]);
+#endif
+}
+
+template <int StageCount>
+void apply_inflation_weighted_update(
+    double h,
+    const double (&B)[StageCount],
+    InflationRKScratch& scratch,
+    size_t gs,
+    const double (&ka)[StageCount],
+    const double (&kad)[StageCount]) {
     for (size_t id = 0; id < gs; ++id) {
-        scratch.ftmp[id] = f[id] + 0.5 * h * scratch.kf[1][id];
-        scratch.fdtmp[id] = fd[id] + 0.5 * h * scratch.kfd[1][id];
+        double sum_f = 0.0;
+        double sum_fd = 0.0;
+        for (int s = 0; s < StageCount; ++s) {
+            const double bs = B[s];
+            if (bs == 0.0) continue;
+            sum_f += bs * scratch.kf[s][id];
+            sum_fd += bs * scratch.kfd[s][id];
+        }
+        f[id] += h * sum_f;
+        fd[id] += h * sum_fd;
     }
 #if calculate_SIGW
     for (int c = 0; c < 6; ++c) {
         for (size_t id = 0; id < gs; ++id) {
-            scratch.htmp[c][id] = static_cast<float>(hij[c][id] + 0.5 * h * static_cast<double>(scratch.kh[1][c][id]));
-            scratch.hdtmp[c][id] = static_cast<float>(hijd[c][id] + 0.5 * h * static_cast<double>(scratch.khd[1][c][id]));
-        }
-    }
-    compute_inflation_rhs(scratch.ftmp, scratch.fdtmp, scratch.htmp, scratch.hdtmp, scratch.kf[2], scratch.kfd[2], scratch.kh[2], scratch.khd[2],
-        a + 0.5 * h * ka[1], ad + 0.5 * h * kad[1], ka[2], kad[2]);
-#else
-    compute_inflation_rhs(scratch.ftmp, scratch.fdtmp, scratch.kf[2], scratch.kfd[2],
-        a + 0.5 * h * ka[1], ad + 0.5 * h * kad[1], ka[2], kad[2]);
-#endif
-
-    for (size_t id = 0; id < gs; ++id) {
-        scratch.ftmp[id] = f[id] + h * scratch.kf[2][id];
-        scratch.fdtmp[id] = fd[id] + h * scratch.kfd[2][id];
-    }
-#if calculate_SIGW
-    for (int c = 0; c < 6; ++c) {
-        for (size_t id = 0; id < gs; ++id) {
-            scratch.htmp[c][id] = static_cast<float>(hij[c][id] + h * static_cast<double>(scratch.kh[2][c][id]));
-            scratch.hdtmp[c][id] = static_cast<float>(hijd[c][id] + h * static_cast<double>(scratch.khd[2][c][id]));
-        }
-    }
-    compute_inflation_rhs(scratch.ftmp, scratch.fdtmp, scratch.htmp, scratch.hdtmp, scratch.kf[3], scratch.kfd[3], scratch.kh[3], scratch.khd[3],
-        a + h * ka[2], ad + h * kad[2], ka[3], kad[3]);
-#else
-    compute_inflation_rhs(scratch.ftmp, scratch.fdtmp, scratch.kf[3], scratch.kfd[3],
-        a + h * ka[2], ad + h * kad[2], ka[3], kad[3]);
-#endif
-
-    const double sixth = h / 6.0;
-    for (size_t id = 0; id < gs; ++id) {
-        f[id] += sixth * (scratch.kf[0][id] + 2.0 * scratch.kf[1][id] + 2.0 * scratch.kf[2][id] + scratch.kf[3][id]);
-        fd[id] += sixth * (scratch.kfd[0][id] + 2.0 * scratch.kfd[1][id] + 2.0 * scratch.kfd[2][id] + scratch.kfd[3][id]);
-    }
-#if calculate_SIGW
-    for (int c = 0; c < 6; ++c) {
-        for (size_t id = 0; id < gs; ++id) {
-            hij[c][id] = static_cast<float>(hij[c][id] + sixth * (
-                static_cast<double>(scratch.kh[0][c][id]) + 2.0 * static_cast<double>(scratch.kh[1][c][id]) +
-                2.0 * static_cast<double>(scratch.kh[2][c][id]) + static_cast<double>(scratch.kh[3][c][id])));
-            hijd[c][id] = static_cast<float>(hijd[c][id] + sixth * (
-                static_cast<double>(scratch.khd[0][c][id]) + 2.0 * static_cast<double>(scratch.khd[1][c][id]) +
-                2.0 * static_cast<double>(scratch.khd[2][c][id]) + static_cast<double>(scratch.khd[3][c][id])));
+            double sum_h = 0.0;
+            double sum_hd = 0.0;
+            for (int s = 0; s < StageCount; ++s) {
+                const double bs = B[s];
+                if (bs == 0.0) continue;
+                sum_h += bs * static_cast<double>(scratch.kh[s][c][id]);
+                sum_hd += bs * static_cast<double>(scratch.khd[s][c][id]);
+            }
+            hij[c][id] = static_cast<float>(static_cast<double>(hij[c][id]) + h * sum_h);
+            hijd[c][id] = static_cast<float>(static_cast<double>(hijd[c][id]) + h * sum_hd);
         }
     }
 #endif
-
-    a += sixth * (ka[0] + 2.0 * ka[1] + 2.0 * ka[2] + ka[3]);
-    ad += sixth * (kad[0] + 2.0 * kad[1] + 2.0 * kad[2] + kad[3]);
+    for (int s = 0; s < StageCount; ++s) {
+        const double bs = B[s];
+        if (bs == 0.0) continue;
+        a += h * bs * ka[s];
+        ad += h * bs * kad[s];
+    }
     t += h;
 }
 
-bool rk45_step_inflation(double h, double hmax, double& h_next, InflationRKScratch& scratch) {
+void rk4_step_inflation(double h, InflationRKScratch& scratch) {
+    // Classical RK4 single accepted step with fixed h.
     const size_t gs = f.size();
     scratch.ensure_size(gs);
 
-    static constexpr double a21 = 1.0 / 5.0;
-    static constexpr double a31 = 3.0 / 40.0, a32 = 9.0 / 40.0;
-    static constexpr double a41 = 44.0 / 45.0, a42 = -56.0 / 15.0, a43 = 32.0 / 9.0;
-    static constexpr double a51 = 19372.0 / 6561.0, a52 = -25360.0 / 2187.0, a53 = 64448.0 / 6561.0, a54 = -212.0 / 729.0;
-    static constexpr double a61 = 9017.0 / 3168.0, a62 = -355.0 / 33.0, a63 = 46732.0 / 5247.0, a64 = 49.0 / 176.0, a65 = -5103.0 / 18656.0;
-    static constexpr double a71 = 35.0 / 384.0, a73 = 500.0 / 1113.0, a74 = 125.0 / 192.0, a75 = -2187.0 / 6784.0, a76 = 11.0 / 84.0;
-
-    static constexpr double b1 = 35.0 / 384.0, b3 = 500.0 / 1113.0, b4 = 125.0 / 192.0, b5 = -2187.0 / 6784.0, b6 = 11.0 / 84.0;
-    static constexpr double bs1 = 5179.0 / 57600.0, bs3 = 7571.0 / 16695.0, bs4 = 393.0 / 640.0, bs5 = -92097.0 / 339200.0, bs6 = 187.0 / 2100.0, bs7 = 1.0 / 40.0;
-
-    static constexpr double e1 = b1 - bs1;
-    static constexpr double e3 = b3 - bs3;
-    static constexpr double e4 = b4 - bs4;
-    static constexpr double e5 = b5 - bs5;
-    static constexpr double e6 = b6 - bs6;
-    static constexpr double e7 = -bs7;
-
-    double ka[7], kad[7];
+    double ka[4] = {0.0, 0.0, 0.0, 0.0};
+    double kad[4] = {0.0, 0.0, 0.0, 0.0};
 
 #if calculate_SIGW
     compute_inflation_rhs(f, fd, hij, hijd, scratch.kf[0], scratch.kfd[0], scratch.kh[0], scratch.khd[0], a, ad, ka[0], kad[0]);
@@ -611,177 +797,69 @@ bool rk45_step_inflation(double h, double hmax, double& h_next, InflationRKScrat
     compute_inflation_rhs(f, fd, scratch.kf[0], scratch.kfd[0], a, ad, ka[0], kad[0]);
 #endif
 
-    for (size_t id = 0; id < gs; ++id) {
-        scratch.ftmp[id] = f[id] + h * (a21 * scratch.kf[0][id]);
-        scratch.fdtmp[id] = fd[id] + h * (a21 * scratch.kfd[0][id]);
+    for (int stage = 1; stage < 4; ++stage) {
+        evaluate_inflation_stage(h, stage, RK4_A, scratch, gs, ka, kad);
     }
+
+    apply_inflation_weighted_update(h, RK4_B, scratch, gs, ka, kad);
+}
+
+bool rk45_step_inflation(double h, double hmax, double& h_next, InflationRKScratch& scratch) {
+    // Dormand-Prince 5(4): computes candidate 5th-order state + embedded error estimate.
+    // On success: commits state and proposes next h. On failure: keeps state, shrinks h.
+    const size_t gs = f.size();
+    scratch.ensure_size(gs);
+
+    double ka[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    double kad[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+
 #if calculate_SIGW
-    for (int c = 0; c < 6; ++c) for (size_t id = 0; id < gs; ++id) {
-        scratch.htmp[c][id] = static_cast<float>(hij[c][id] + h * (a21 * static_cast<double>(scratch.kh[0][c][id])));
-        scratch.hdtmp[c][id] = static_cast<float>(hijd[c][id] + h * (a21 * static_cast<double>(scratch.khd[0][c][id])));
-    }
-    compute_inflation_rhs(scratch.ftmp, scratch.fdtmp, scratch.htmp, scratch.hdtmp, scratch.kf[1], scratch.kfd[1], scratch.kh[1], scratch.khd[1],
-        a + h * (a21 * ka[0]), ad + h * (a21 * kad[0]), ka[1], kad[1]);
+    compute_inflation_rhs(f, fd, hij, hijd, scratch.kf[0], scratch.kfd[0], scratch.kh[0], scratch.khd[0], a, ad, ka[0], kad[0]);
 #else
-    compute_inflation_rhs(scratch.ftmp, scratch.fdtmp, scratch.kf[1], scratch.kfd[1],
-        a + h * (a21 * ka[0]), ad + h * (a21 * kad[0]), ka[1], kad[1]);
+    compute_inflation_rhs(f, fd, scratch.kf[0], scratch.kfd[0], a, ad, ka[0], kad[0]);
 #endif
 
-    for (size_t id = 0; id < gs; ++id) {
-        scratch.ftmp[id] = f[id] + h * (a31 * scratch.kf[0][id] + a32 * scratch.kf[1][id]);
-        scratch.fdtmp[id] = fd[id] + h * (a31 * scratch.kfd[0][id] + a32 * scratch.kfd[1][id]);
+    for (int stage = 1; stage < 7; ++stage) {
+        evaluate_inflation_stage(h, stage, DP_A, scratch, gs, ka, kad);
     }
-#if calculate_SIGW
-    for (int c = 0; c < 6; ++c) for (size_t id = 0; id < gs; ++id) {
-        scratch.htmp[c][id] = static_cast<float>(hij[c][id] + h * (
-            a31 * static_cast<double>(scratch.kh[0][c][id]) + a32 * static_cast<double>(scratch.kh[1][c][id])));
-        scratch.hdtmp[c][id] = static_cast<float>(hijd[c][id] + h * (
-            a31 * static_cast<double>(scratch.khd[0][c][id]) + a32 * static_cast<double>(scratch.khd[1][c][id])));
-    }
-    compute_inflation_rhs(scratch.ftmp, scratch.fdtmp, scratch.htmp, scratch.hdtmp, scratch.kf[2], scratch.kfd[2], scratch.kh[2], scratch.khd[2],
-        a + h * (a31 * ka[0] + a32 * ka[1]), ad + h * (a31 * kad[0] + a32 * kad[1]), ka[2], kad[2]);
-#else
-    compute_inflation_rhs(scratch.ftmp, scratch.fdtmp, scratch.kf[2], scratch.kfd[2],
-        a + h * (a31 * ka[0] + a32 * ka[1]), ad + h * (a31 * kad[0] + a32 * kad[1]), ka[2], kad[2]);
-#endif
 
-    for (size_t id = 0; id < gs; ++id) {
-        scratch.ftmp[id] = f[id] + h * (a41 * scratch.kf[0][id] + a42 * scratch.kf[1][id] + a43 * scratch.kf[2][id]);
-        scratch.fdtmp[id] = fd[id] + h * (a41 * scratch.kfd[0][id] + a42 * scratch.kfd[1][id] + a43 * scratch.kfd[2][id]);
+    double a5 = a;
+    double ad5 = ad;
+    double erra = 0.0;
+    double errad = 0.0;
+    for (int s = 0; s < 7; ++s) {
+        const double bs = DP_B[s];
+        const double es = DP_E[s];
+        if (bs != 0.0) {
+            a5 += h * bs * ka[s];
+            ad5 += h * bs * kad[s];
+        }
+        if (es != 0.0) {
+            erra += h * es * ka[s];
+            errad += h * es * kad[s];
+        }
     }
-#if calculate_SIGW
-    for (int c = 0; c < 6; ++c) for (size_t id = 0; id < gs; ++id) {
-        scratch.htmp[c][id] = static_cast<float>(hij[c][id] + h * (
-            a41 * static_cast<double>(scratch.kh[0][c][id]) +
-            a42 * static_cast<double>(scratch.kh[1][c][id]) +
-            a43 * static_cast<double>(scratch.kh[2][c][id])));
-        scratch.hdtmp[c][id] = static_cast<float>(hijd[c][id] + h * (
-            a41 * static_cast<double>(scratch.khd[0][c][id]) +
-            a42 * static_cast<double>(scratch.khd[1][c][id]) +
-            a43 * static_cast<double>(scratch.khd[2][c][id])));
-    }
-    compute_inflation_rhs(scratch.ftmp, scratch.fdtmp, scratch.htmp, scratch.hdtmp, scratch.kf[3], scratch.kfd[3], scratch.kh[3], scratch.khd[3],
-        a + h * (a41 * ka[0] + a42 * ka[1] + a43 * ka[2]),
-        ad + h * (a41 * kad[0] + a42 * kad[1] + a43 * kad[2]), ka[3], kad[3]);
-#else
-    compute_inflation_rhs(scratch.ftmp, scratch.fdtmp, scratch.kf[3], scratch.kfd[3],
-        a + h * (a41 * ka[0] + a42 * ka[1] + a43 * ka[2]),
-        ad + h * (a41 * kad[0] + a42 * kad[1] + a43 * kad[2]), ka[3], kad[3]);
-#endif
-
-    for (size_t id = 0; id < gs; ++id) {
-        scratch.ftmp[id] = f[id] + h * (
-            a51 * scratch.kf[0][id] + a52 * scratch.kf[1][id] + a53 * scratch.kf[2][id] + a54 * scratch.kf[3][id]);
-        scratch.fdtmp[id] = fd[id] + h * (
-            a51 * scratch.kfd[0][id] + a52 * scratch.kfd[1][id] + a53 * scratch.kfd[2][id] + a54 * scratch.kfd[3][id]);
-    }
-#if calculate_SIGW
-    for (int c = 0; c < 6; ++c) for (size_t id = 0; id < gs; ++id) {
-        scratch.htmp[c][id] = static_cast<float>(hij[c][id] + h * (
-            a51 * static_cast<double>(scratch.kh[0][c][id]) +
-            a52 * static_cast<double>(scratch.kh[1][c][id]) +
-            a53 * static_cast<double>(scratch.kh[2][c][id]) +
-            a54 * static_cast<double>(scratch.kh[3][c][id])));
-        scratch.hdtmp[c][id] = static_cast<float>(hijd[c][id] + h * (
-            a51 * static_cast<double>(scratch.khd[0][c][id]) +
-            a52 * static_cast<double>(scratch.khd[1][c][id]) +
-            a53 * static_cast<double>(scratch.khd[2][c][id]) +
-            a54 * static_cast<double>(scratch.khd[3][c][id])));
-    }
-    compute_inflation_rhs(scratch.ftmp, scratch.fdtmp, scratch.htmp, scratch.hdtmp, scratch.kf[4], scratch.kfd[4], scratch.kh[4], scratch.khd[4],
-        a + h * (a51 * ka[0] + a52 * ka[1] + a53 * ka[2] + a54 * ka[3]),
-        ad + h * (a51 * kad[0] + a52 * kad[1] + a53 * kad[2] + a54 * kad[3]), ka[4], kad[4]);
-#else
-    compute_inflation_rhs(scratch.ftmp, scratch.fdtmp, scratch.kf[4], scratch.kfd[4],
-        a + h * (a51 * ka[0] + a52 * ka[1] + a53 * ka[2] + a54 * ka[3]),
-        ad + h * (a51 * kad[0] + a52 * kad[1] + a53 * kad[2] + a54 * kad[3]), ka[4], kad[4]);
-#endif
-
-    for (size_t id = 0; id < gs; ++id) {
-        scratch.ftmp[id] = f[id] + h * (
-            a61 * scratch.kf[0][id] + a62 * scratch.kf[1][id] + a63 * scratch.kf[2][id] +
-            a64 * scratch.kf[3][id] + a65 * scratch.kf[4][id]);
-        scratch.fdtmp[id] = fd[id] + h * (
-            a61 * scratch.kfd[0][id] + a62 * scratch.kfd[1][id] + a63 * scratch.kfd[2][id] +
-            a64 * scratch.kfd[3][id] + a65 * scratch.kfd[4][id]);
-    }
-#if calculate_SIGW
-    for (int c = 0; c < 6; ++c) for (size_t id = 0; id < gs; ++id) {
-        scratch.htmp[c][id] = static_cast<float>(hij[c][id] + h * (
-            a61 * static_cast<double>(scratch.kh[0][c][id]) +
-            a62 * static_cast<double>(scratch.kh[1][c][id]) +
-            a63 * static_cast<double>(scratch.kh[2][c][id]) +
-            a64 * static_cast<double>(scratch.kh[3][c][id]) +
-            a65 * static_cast<double>(scratch.kh[4][c][id])));
-        scratch.hdtmp[c][id] = static_cast<float>(hijd[c][id] + h * (
-            a61 * static_cast<double>(scratch.khd[0][c][id]) +
-            a62 * static_cast<double>(scratch.khd[1][c][id]) +
-            a63 * static_cast<double>(scratch.khd[2][c][id]) +
-            a64 * static_cast<double>(scratch.khd[3][c][id]) +
-            a65 * static_cast<double>(scratch.khd[4][c][id])));
-    }
-    compute_inflation_rhs(scratch.ftmp, scratch.fdtmp, scratch.htmp, scratch.hdtmp, scratch.kf[5], scratch.kfd[5], scratch.kh[5], scratch.khd[5],
-        a + h * (a61 * ka[0] + a62 * ka[1] + a63 * ka[2] + a64 * ka[3] + a65 * ka[4]),
-        ad + h * (a61 * kad[0] + a62 * kad[1] + a63 * kad[2] + a64 * kad[3] + a65 * kad[4]), ka[5], kad[5]);
-#else
-    compute_inflation_rhs(scratch.ftmp, scratch.fdtmp, scratch.kf[5], scratch.kfd[5],
-        a + h * (a61 * ka[0] + a62 * ka[1] + a63 * ka[2] + a64 * ka[3] + a65 * ka[4]),
-        ad + h * (a61 * kad[0] + a62 * kad[1] + a63 * kad[2] + a64 * kad[3] + a65 * kad[4]), ka[5], kad[5]);
-#endif
-
-    for (size_t id = 0; id < gs; ++id) {
-        scratch.ftmp[id] = f[id] + h * (
-            a71 * scratch.kf[0][id] + a73 * scratch.kf[2][id] + a74 * scratch.kf[3][id] +
-            a75 * scratch.kf[4][id] + a76 * scratch.kf[5][id]);
-        scratch.fdtmp[id] = fd[id] + h * (
-            a71 * scratch.kfd[0][id] + a73 * scratch.kfd[2][id] + a74 * scratch.kfd[3][id] +
-            a75 * scratch.kfd[4][id] + a76 * scratch.kfd[5][id]);
-    }
-#if calculate_SIGW
-    for (int c = 0; c < 6; ++c) for (size_t id = 0; id < gs; ++id) {
-        scratch.htmp[c][id] = static_cast<float>(hij[c][id] + h * (
-            a71 * static_cast<double>(scratch.kh[0][c][id]) +
-            a73 * static_cast<double>(scratch.kh[2][c][id]) +
-            a74 * static_cast<double>(scratch.kh[3][c][id]) +
-            a75 * static_cast<double>(scratch.kh[4][c][id]) +
-            a76 * static_cast<double>(scratch.kh[5][c][id])));
-        scratch.hdtmp[c][id] = static_cast<float>(hijd[c][id] + h * (
-            a71 * static_cast<double>(scratch.khd[0][c][id]) +
-            a73 * static_cast<double>(scratch.khd[2][c][id]) +
-            a74 * static_cast<double>(scratch.khd[3][c][id]) +
-            a75 * static_cast<double>(scratch.khd[4][c][id]) +
-            a76 * static_cast<double>(scratch.khd[5][c][id])));
-    }
-    compute_inflation_rhs(scratch.ftmp, scratch.fdtmp, scratch.htmp, scratch.hdtmp, scratch.kf[6], scratch.kfd[6], scratch.kh[6], scratch.khd[6],
-        a + h * (a71 * ka[0] + a73 * ka[2] + a74 * ka[3] + a75 * ka[4] + a76 * ka[5]),
-        ad + h * (a71 * kad[0] + a73 * kad[2] + a74 * kad[3] + a75 * kad[4] + a76 * kad[5]), ka[6], kad[6]);
-#else
-    compute_inflation_rhs(scratch.ftmp, scratch.fdtmp, scratch.kf[6], scratch.kfd[6],
-        a + h * (a71 * ka[0] + a73 * ka[2] + a74 * ka[3] + a75 * ka[4] + a76 * ka[5]),
-        ad + h * (a71 * kad[0] + a73 * kad[2] + a74 * kad[3] + a75 * kad[4] + a76 * kad[5]), ka[6], kad[6]);
-#endif
-
-    const double a5 = a + h * (b1 * ka[0] + b3 * ka[2] + b4 * ka[3] + b5 * ka[4] + b6 * ka[5]);
-    const double ad5 = ad + h * (b1 * kad[0] + b3 * kad[2] + b4 * kad[3] + b5 * kad[4] + b6 * kad[5]);
-    const double erra = h * (e1 * ka[0] + e3 * ka[2] + e4 * ka[3] + e5 * ka[4] + e6 * ka[5] + e7 * ka[6]);
-    const double errad = h * (e1 * kad[0] + e3 * kad[2] + e4 * kad[3] + e5 * kad[4] + e6 * kad[5] + e7 * kad[6]);
 
     double err_acc = 0.0;
     std::size_t nvars = 2 * gs + 2;
 
     for (size_t id = 0; id < gs; ++id) {
-        const double y5f = f[id] + h * (
-            b1 * scratch.kf[0][id] + b3 * scratch.kf[2][id] + b4 * scratch.kf[3][id] +
-            b5 * scratch.kf[4][id] + b6 * scratch.kf[5][id]);
-        const double y5fd = fd[id] + h * (
-            b1 * scratch.kfd[0][id] + b3 * scratch.kfd[2][id] + b4 * scratch.kfd[3][id] +
-            b5 * scratch.kfd[4][id] + b6 * scratch.kfd[5][id]);
-        const double errf = h * (
-            e1 * scratch.kf[0][id] + e3 * scratch.kf[2][id] + e4 * scratch.kf[3][id] +
-            e5 * scratch.kf[4][id] + e6 * scratch.kf[5][id] + e7 * scratch.kf[6][id]);
-        const double errfd = h * (
-            e1 * scratch.kfd[0][id] + e3 * scratch.kfd[2][id] + e4 * scratch.kfd[3][id] +
-            e5 * scratch.kfd[4][id] + e6 * scratch.kfd[5][id] + e7 * scratch.kfd[6][id]);
+        double y5f = f[id];
+        double y5fd = fd[id];
+        double errf = 0.0;
+        double errfd = 0.0;
+        for (int s = 0; s < 7; ++s) {
+            const double bs = DP_B[s];
+            const double es = DP_E[s];
+            if (bs != 0.0) {
+                y5f += h * bs * scratch.kf[s][id];
+                y5fd += h * bs * scratch.kfd[s][id];
+            }
+            if (es != 0.0) {
+                errf += h * es * scratch.kf[s][id];
+                errfd += h * es * scratch.kfd[s][id];
+            }
+        }
 
         scratch.ftmp[id] = y5f;
         scratch.fdtmp[id] = y5fd;
@@ -795,32 +873,22 @@ bool rk45_step_inflation(double h, double hmax, double& h_next, InflationRKScrat
     nvars += 12 * gs;
     for (int c = 0; c < 6; ++c) {
         for (size_t id = 0; id < gs; ++id) {
-            const double y5h = static_cast<double>(hij[c][id]) + h * (
-                b1 * static_cast<double>(scratch.kh[0][c][id]) +
-                b3 * static_cast<double>(scratch.kh[2][c][id]) +
-                b4 * static_cast<double>(scratch.kh[3][c][id]) +
-                b5 * static_cast<double>(scratch.kh[4][c][id]) +
-                b6 * static_cast<double>(scratch.kh[5][c][id]));
-            const double y5hd = static_cast<double>(hijd[c][id]) + h * (
-                b1 * static_cast<double>(scratch.khd[0][c][id]) +
-                b3 * static_cast<double>(scratch.khd[2][c][id]) +
-                b4 * static_cast<double>(scratch.khd[3][c][id]) +
-                b5 * static_cast<double>(scratch.khd[4][c][id]) +
-                b6 * static_cast<double>(scratch.khd[5][c][id]));
-            const double errh = h * (
-                e1 * static_cast<double>(scratch.kh[0][c][id]) +
-                e3 * static_cast<double>(scratch.kh[2][c][id]) +
-                e4 * static_cast<double>(scratch.kh[3][c][id]) +
-                e5 * static_cast<double>(scratch.kh[4][c][id]) +
-                e6 * static_cast<double>(scratch.kh[5][c][id]) +
-                e7 * static_cast<double>(scratch.kh[6][c][id]));
-            const double errhd = h * (
-                e1 * static_cast<double>(scratch.khd[0][c][id]) +
-                e3 * static_cast<double>(scratch.khd[2][c][id]) +
-                e4 * static_cast<double>(scratch.khd[3][c][id]) +
-                e5 * static_cast<double>(scratch.khd[4][c][id]) +
-                e6 * static_cast<double>(scratch.khd[5][c][id]) +
-                e7 * static_cast<double>(scratch.khd[6][c][id]));
+            double y5h = static_cast<double>(hij[c][id]);
+            double y5hd = static_cast<double>(hijd[c][id]);
+            double errh = 0.0;
+            double errhd = 0.0;
+            for (int s = 0; s < 7; ++s) {
+                const double bs = DP_B[s];
+                const double es = DP_E[s];
+                if (bs != 0.0) {
+                    y5h += h * bs * static_cast<double>(scratch.kh[s][c][id]);
+                    y5hd += h * bs * static_cast<double>(scratch.khd[s][c][id]);
+                }
+                if (es != 0.0) {
+                    errh += h * es * static_cast<double>(scratch.kh[s][c][id]);
+                    errhd += h * es * static_cast<double>(scratch.khd[s][c][id]);
+                }
+            }
 
             scratch.htmp[c][id] = static_cast<float>(y5h);
             scratch.hdtmp[c][id] = static_cast<float>(y5hd);
@@ -865,6 +933,11 @@ bool rk45_step_inflation(double h, double hmax, double& h_next, InflationRKScrat
 // -------------------- Main Evolution Loop --------------------
 
 void run_evolution_loop(FILE* output_) {
+    // Main inflation driver:
+    // - selects integrator backend
+    // - performs periodic outputs/logging
+    // - guarantees final saved state is synchronized for output
+    ensure_periodic_index_cache();
     int numsteps = 0;
 
     InflationRKScratch rk_scratch;
@@ -880,64 +953,73 @@ void run_evolution_loop(FILE* output_) {
         }
         fprintf(output_, "scale factor a = %f\n", a);
         fprintf(output_, "numsteps %i\n\n", step_index);
-        fflush(output_);
+        if (step_index % output_freq == 0) {
+            fflush(output_);
+        }
     };
 
-    if (integrator == INTEGRATOR_LEAPFROG) {
-        evolve_fields(0.5 * dt); // First leapfrog step
+    switch (integrator) {
+        case INTEGRATOR_LEAPFROG: {
+            evolve_fields(0.5 * dt); // First leapfrog step
 
-        while (a <= af) {
-            double dt_rescaled = dt * std::pow(astep, rescale_s - 1.0);
-            evolve_derivs(dt_rescaled);
-            evolve_fields(dt_rescaled);
+            while (a <= af) {
+                const double dt_rescaled = inflation_rescaled_step(astep);
+                evolve_derivs(dt_rescaled);
+                evolve_fields(dt_rescaled);
 
-            numsteps++;
-            report_step(numsteps);
-            astep = a;
-        }
-    } else if (integrator == INTEGRATOR_RK4) {
-        while (a <= af) {
-            const double dt_rescaled = dt * std::pow(astep, rescale_s - 1.0);
-            rk4_step_inflation(dt_rescaled, rk_scratch);
-
-            numsteps++;
-            report_step(numsteps);
-            astep = a;
-        }
-    } else {
-        double h = clamp_rk45_step(dt * std::pow(astep, rescale_s - 1.0), rk45_max_dt);
-
-        while (a <= af) {
-            const double base_step = dt * std::pow(astep, rescale_s - 1.0);
-            const double hmax = std::min(rk45_max_dt, std::max(rk45_min_dt, 2.0 * base_step));
-            h = clamp_rk45_step(h, hmax);
-
-            bool accepted = false;
-            int attempts = 0;
-            while (!accepted) {
-                double h_suggested = h;
-                accepted = rk45_step_inflation(h, hmax, h_suggested, rk_scratch);
-                h = h_suggested;
-                attempts++;
-
-                if (!accepted && (attempts > 25 || h <= rk45_min_dt * (1.0 + 1e-12))) {
-                    std::fprintf(stderr,
-                        "RK45 failed to converge at a=%e, t=%e (attempts=%d, h=%e)\n",
-                        a, t, attempts, h);
-                    std::exit(1);
-                }
+                numsteps++;
+                report_step(numsteps);
+                astep = a;
             }
+            break;
+        }
+        case INTEGRATOR_RK4: {
+            while (a <= af) {
+                const double dt_rescaled = inflation_rescaled_step(astep);
+                rk4_step_inflation(dt_rescaled, rk_scratch);
 
-            numsteps++;
-            report_step(numsteps);
-            astep = a;
+                numsteps++;
+                report_step(numsteps);
+                astep = a;
+            }
+            break;
+        }
+        case INTEGRATOR_RK45:
+        default: {
+            double h = clamp_rk45_step(inflation_rescaled_step(astep), rk45_max_dt);
+
+            while (a <= af) {
+                const double base_step = inflation_rescaled_step(astep);
+                const double hmax = rk45_hmax_from_base_step(base_step);
+                h = clamp_rk45_step(h, hmax);
+
+                h = rk45_accept_step(
+                    h,
+                    hmax,
+                    [&](double h_trial, double h_limit, double& h_next) {
+                        return rk45_step_inflation(h_trial, h_limit, h_next, rk_scratch);
+                    },
+                    [&](int attempts, double failed_h) {
+                        std::fprintf(stderr,
+                            "RK45 failed to converge at a=%e, t=%e (attempts=%d, h=%e)\n",
+                            a, t, attempts, failed_h);
+                        std::exit(1);
+                    }
+                );
+
+                numsteps++;
+                report_step(numsteps);
+                astep = a;
+            }
+            break;
         }
     }
 
     printf("Saving final inflaton data\n");
+    fflush(output_);
     save(1);
     if (inflation_uses_staggered_derivatives()) {
-        evolve_fields(-0.5 * dt * std::pow(astep, rescale_s - 1.0)); // sync field values with velocities
+        evolve_fields(-0.5 * inflation_rescaled_step(astep)); // sync field values with velocities
     }
     save_last();
 }
@@ -1006,6 +1088,8 @@ struct DeltaNRKScratch {
 
 double g_deltaN_phiref_potential = 0.0;
 
+// deltaN RHS in e-folding-time coordinates.
+// Stopping criterion is encoded in ddNdt (active sites evolve N, inactive sites freeze N).
 void compute_deltaN_rhs(
     const std::vector<double>& f_state,
     const std::vector<double>& fd_state,
@@ -1056,152 +1140,127 @@ void compute_deltaN_rhs(
     dadt = ad;
 }
 
-void rk4_step_deltaN(double h, DeltaNRKScratch& scratch) {
-    const size_t gs = f.size();
-    scratch.ensure_size(gs);
-
-    double ka[4];
-    compute_deltaN_rhs(f, fd, scratch.kf[0], scratch.kfd[0], scratch.kdn[0], ka[0]);
-
+template <int StageCount>
+void prepare_deltaN_stage_state(double h, int stage, const double (&A)[StageCount][StageCount], DeltaNRKScratch& scratch, size_t gs) {
     for (size_t id = 0; id < gs; ++id) {
-        scratch.ftmp[id] = f[id] + 0.5 * h * scratch.kf[0][id];
-        scratch.fdtmp[id] = fd[id] + 0.5 * h * scratch.kfd[0][id];
-        scratch.dntmp[id] = deltaN[id] + 0.5 * h * scratch.kdn[0][id];
+        double sum_f = 0.0;
+        double sum_fd = 0.0;
+        double sum_dn = 0.0;
+        for (int s = 0; s < stage; ++s) {
+            const double c = A[stage][s];
+            if (c == 0.0) continue;
+            sum_f += c * scratch.kf[s][id];
+            sum_fd += c * scratch.kfd[s][id];
+            sum_dn += c * scratch.kdn[s][id];
+        }
+        scratch.ftmp[id] = f[id] + h * sum_f;
+        scratch.fdtmp[id] = fd[id] + h * sum_fd;
+        scratch.dntmp[id] = deltaN[id] + h * sum_dn;
     }
-    compute_deltaN_rhs(scratch.ftmp, scratch.fdtmp, scratch.kf[1], scratch.kfd[1], scratch.kdn[1], ka[1]);
+}
 
+template <int StageCount>
+void evaluate_deltaN_stage(
+    double h,
+    int stage,
+    const double (&A)[StageCount][StageCount],
+    DeltaNRKScratch& scratch,
+    size_t gs,
+    double (&ka)[StageCount]) {
+    prepare_deltaN_stage_state(h, stage, A, scratch, gs);
+    compute_deltaN_rhs(scratch.ftmp, scratch.fdtmp, scratch.kf[stage], scratch.kfd[stage], scratch.kdn[stage], ka[stage]);
+}
+
+template <int StageCount>
+void apply_deltaN_weighted_update(
+    double h,
+    const double (&B)[StageCount],
+    DeltaNRKScratch& scratch,
+    size_t gs,
+    const double (&ka)[StageCount]) {
     for (size_t id = 0; id < gs; ++id) {
-        scratch.ftmp[id] = f[id] + 0.5 * h * scratch.kf[1][id];
-        scratch.fdtmp[id] = fd[id] + 0.5 * h * scratch.kfd[1][id];
-        scratch.dntmp[id] = deltaN[id] + 0.5 * h * scratch.kdn[1][id];
+        double sum_f = 0.0;
+        double sum_fd = 0.0;
+        double sum_dn = 0.0;
+        for (int s = 0; s < StageCount; ++s) {
+            const double bs = B[s];
+            if (bs == 0.0) continue;
+            sum_f += bs * scratch.kf[s][id];
+            sum_fd += bs * scratch.kfd[s][id];
+            sum_dn += bs * scratch.kdn[s][id];
+        }
+        f[id] += h * sum_f;
+        fd[id] += h * sum_fd;
+        deltaN[id] += h * sum_dn;
     }
-    compute_deltaN_rhs(scratch.ftmp, scratch.fdtmp, scratch.kf[2], scratch.kfd[2], scratch.kdn[2], ka[2]);
-
-    for (size_t id = 0; id < gs; ++id) {
-        scratch.ftmp[id] = f[id] + h * scratch.kf[2][id];
-        scratch.fdtmp[id] = fd[id] + h * scratch.kfd[2][id];
-        scratch.dntmp[id] = deltaN[id] + h * scratch.kdn[2][id];
+    for (int s = 0; s < StageCount; ++s) {
+        const double bs = B[s];
+        if (bs == 0.0) continue;
+        a += h * bs * ka[s];
     }
-    compute_deltaN_rhs(scratch.ftmp, scratch.fdtmp, scratch.kf[3], scratch.kfd[3], scratch.kdn[3], ka[3]);
-
-    const double sixth = h / 6.0;
-    for (size_t id = 0; id < gs; ++id) {
-        f[id] += sixth * (scratch.kf[0][id] + 2.0 * scratch.kf[1][id] + 2.0 * scratch.kf[2][id] + scratch.kf[3][id]);
-        fd[id] += sixth * (scratch.kfd[0][id] + 2.0 * scratch.kfd[1][id] + 2.0 * scratch.kfd[2][id] + scratch.kfd[3][id]);
-        deltaN[id] += sixth * (scratch.kdn[0][id] + 2.0 * scratch.kdn[1][id] + 2.0 * scratch.kdn[2][id] + scratch.kdn[3][id]);
-    }
-
-    a += sixth * (ka[0] + 2.0 * ka[1] + 2.0 * ka[2] + ka[3]);
     t += h;
 }
 
-bool rk45_step_deltaN(double h, double hmax, double& h_next, DeltaNRKScratch& scratch) {
+void rk4_step_deltaN(double h, DeltaNRKScratch& scratch) {
+    // Classical RK4 single accepted step with fixed h.
     const size_t gs = f.size();
     scratch.ensure_size(gs);
 
-    static constexpr double a21 = 1.0 / 5.0;
-    static constexpr double a31 = 3.0 / 40.0, a32 = 9.0 / 40.0;
-    static constexpr double a41 = 44.0 / 45.0, a42 = -56.0 / 15.0, a43 = 32.0 / 9.0;
-    static constexpr double a51 = 19372.0 / 6561.0, a52 = -25360.0 / 2187.0, a53 = 64448.0 / 6561.0, a54 = -212.0 / 729.0;
-    static constexpr double a61 = 9017.0 / 3168.0, a62 = -355.0 / 33.0, a63 = 46732.0 / 5247.0, a64 = 49.0 / 176.0, a65 = -5103.0 / 18656.0;
-    static constexpr double a71 = 35.0 / 384.0, a73 = 500.0 / 1113.0, a74 = 125.0 / 192.0, a75 = -2187.0 / 6784.0, a76 = 11.0 / 84.0;
-
-    static constexpr double b1 = 35.0 / 384.0, b3 = 500.0 / 1113.0, b4 = 125.0 / 192.0, b5 = -2187.0 / 6784.0, b6 = 11.0 / 84.0;
-    static constexpr double bs1 = 5179.0 / 57600.0, bs3 = 7571.0 / 16695.0, bs4 = 393.0 / 640.0, bs5 = -92097.0 / 339200.0, bs6 = 187.0 / 2100.0, bs7 = 1.0 / 40.0;
-
-    static constexpr double e1 = b1 - bs1;
-    static constexpr double e3 = b3 - bs3;
-    static constexpr double e4 = b4 - bs4;
-    static constexpr double e5 = b5 - bs5;
-    static constexpr double e6 = b6 - bs6;
-    static constexpr double e7 = -bs7;
-
-    double ka[7];
+    double ka[4] = {0.0, 0.0, 0.0, 0.0};
     compute_deltaN_rhs(f, fd, scratch.kf[0], scratch.kfd[0], scratch.kdn[0], ka[0]);
 
-    for (size_t id = 0; id < gs; ++id) {
-        scratch.ftmp[id] = f[id] + h * (a21 * scratch.kf[0][id]);
-        scratch.fdtmp[id] = fd[id] + h * (a21 * scratch.kfd[0][id]);
-        scratch.dntmp[id] = deltaN[id] + h * (a21 * scratch.kdn[0][id]);
+    for (int stage = 1; stage < 4; ++stage) {
+        evaluate_deltaN_stage(h, stage, RK4_A, scratch, gs, ka);
     }
-    compute_deltaN_rhs(scratch.ftmp, scratch.fdtmp, scratch.kf[1], scratch.kfd[1], scratch.kdn[1], ka[1]);
 
-    for (size_t id = 0; id < gs; ++id) {
-        scratch.ftmp[id] = f[id] + h * (a31 * scratch.kf[0][id] + a32 * scratch.kf[1][id]);
-        scratch.fdtmp[id] = fd[id] + h * (a31 * scratch.kfd[0][id] + a32 * scratch.kfd[1][id]);
-        scratch.dntmp[id] = deltaN[id] + h * (a31 * scratch.kdn[0][id] + a32 * scratch.kdn[1][id]);
+    apply_deltaN_weighted_update(h, RK4_B, scratch, gs, ka);
+}
+
+bool rk45_step_deltaN(double h, double hmax, double& h_next, DeltaNRKScratch& scratch) {
+    // Dormand-Prince 5(4) with the same error-controller policy as inflation RK45.
+    const size_t gs = f.size();
+    scratch.ensure_size(gs);
+
+    double ka[7] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    compute_deltaN_rhs(f, fd, scratch.kf[0], scratch.kfd[0], scratch.kdn[0], ka[0]);
+
+    for (int stage = 1; stage < 7; ++stage) {
+        evaluate_deltaN_stage(h, stage, DP_A, scratch, gs, ka);
     }
-    compute_deltaN_rhs(scratch.ftmp, scratch.fdtmp, scratch.kf[2], scratch.kfd[2], scratch.kdn[2], ka[2]);
 
-    for (size_t id = 0; id < gs; ++id) {
-        scratch.ftmp[id] = f[id] + h * (a41 * scratch.kf[0][id] + a42 * scratch.kf[1][id] + a43 * scratch.kf[2][id]);
-        scratch.fdtmp[id] = fd[id] + h * (a41 * scratch.kfd[0][id] + a42 * scratch.kfd[1][id] + a43 * scratch.kfd[2][id]);
-        scratch.dntmp[id] = deltaN[id] + h * (a41 * scratch.kdn[0][id] + a42 * scratch.kdn[1][id] + a43 * scratch.kdn[2][id]);
+    double a5 = a;
+    double erra = 0.0;
+    for (int s = 0; s < 7; ++s) {
+        const double bs = DP_B[s];
+        const double es = DP_E[s];
+        if (bs != 0.0) a5 += h * bs * ka[s];
+        if (es != 0.0) erra += h * es * ka[s];
     }
-    compute_deltaN_rhs(scratch.ftmp, scratch.fdtmp, scratch.kf[3], scratch.kfd[3], scratch.kdn[3], ka[3]);
-
-    for (size_t id = 0; id < gs; ++id) {
-        scratch.ftmp[id] = f[id] + h * (
-            a51 * scratch.kf[0][id] + a52 * scratch.kf[1][id] + a53 * scratch.kf[2][id] + a54 * scratch.kf[3][id]);
-        scratch.fdtmp[id] = fd[id] + h * (
-            a51 * scratch.kfd[0][id] + a52 * scratch.kfd[1][id] + a53 * scratch.kfd[2][id] + a54 * scratch.kfd[3][id]);
-        scratch.dntmp[id] = deltaN[id] + h * (
-            a51 * scratch.kdn[0][id] + a52 * scratch.kdn[1][id] + a53 * scratch.kdn[2][id] + a54 * scratch.kdn[3][id]);
-    }
-    compute_deltaN_rhs(scratch.ftmp, scratch.fdtmp, scratch.kf[4], scratch.kfd[4], scratch.kdn[4], ka[4]);
-
-    for (size_t id = 0; id < gs; ++id) {
-        scratch.ftmp[id] = f[id] + h * (
-            a61 * scratch.kf[0][id] + a62 * scratch.kf[1][id] + a63 * scratch.kf[2][id] +
-            a64 * scratch.kf[3][id] + a65 * scratch.kf[4][id]);
-        scratch.fdtmp[id] = fd[id] + h * (
-            a61 * scratch.kfd[0][id] + a62 * scratch.kfd[1][id] + a63 * scratch.kfd[2][id] +
-            a64 * scratch.kfd[3][id] + a65 * scratch.kfd[4][id]);
-        scratch.dntmp[id] = deltaN[id] + h * (
-            a61 * scratch.kdn[0][id] + a62 * scratch.kdn[1][id] + a63 * scratch.kdn[2][id] +
-            a64 * scratch.kdn[3][id] + a65 * scratch.kdn[4][id]);
-    }
-    compute_deltaN_rhs(scratch.ftmp, scratch.fdtmp, scratch.kf[5], scratch.kfd[5], scratch.kdn[5], ka[5]);
-
-    for (size_t id = 0; id < gs; ++id) {
-        scratch.ftmp[id] = f[id] + h * (
-            a71 * scratch.kf[0][id] + a73 * scratch.kf[2][id] + a74 * scratch.kf[3][id] +
-            a75 * scratch.kf[4][id] + a76 * scratch.kf[5][id]);
-        scratch.fdtmp[id] = fd[id] + h * (
-            a71 * scratch.kfd[0][id] + a73 * scratch.kfd[2][id] + a74 * scratch.kfd[3][id] +
-            a75 * scratch.kfd[4][id] + a76 * scratch.kfd[5][id]);
-        scratch.dntmp[id] = deltaN[id] + h * (
-            a71 * scratch.kdn[0][id] + a73 * scratch.kdn[2][id] + a74 * scratch.kdn[3][id] +
-            a75 * scratch.kdn[4][id] + a76 * scratch.kdn[5][id]);
-    }
-    compute_deltaN_rhs(scratch.ftmp, scratch.fdtmp, scratch.kf[6], scratch.kfd[6], scratch.kdn[6], ka[6]);
-
-    const double a5 = a + h * (b1 * ka[0] + b3 * ka[2] + b4 * ka[3] + b5 * ka[4] + b6 * ka[5]);
-    const double erra = h * (e1 * ka[0] + e3 * ka[2] + e4 * ka[3] + e5 * ka[4] + e6 * ka[5] + e7 * ka[6]);
 
     double err_acc = 0.0;
     std::size_t nvars = 3 * gs + 1;
 
     for (size_t id = 0; id < gs; ++id) {
-        const double y5f = f[id] + h * (
-            b1 * scratch.kf[0][id] + b3 * scratch.kf[2][id] + b4 * scratch.kf[3][id] +
-            b5 * scratch.kf[4][id] + b6 * scratch.kf[5][id]);
-        const double y5fd = fd[id] + h * (
-            b1 * scratch.kfd[0][id] + b3 * scratch.kfd[2][id] + b4 * scratch.kfd[3][id] +
-            b5 * scratch.kfd[4][id] + b6 * scratch.kfd[5][id]);
-        const double y5dn = deltaN[id] + h * (
-            b1 * scratch.kdn[0][id] + b3 * scratch.kdn[2][id] + b4 * scratch.kdn[3][id] +
-            b5 * scratch.kdn[4][id] + b6 * scratch.kdn[5][id]);
-
-        const double errf = h * (
-            e1 * scratch.kf[0][id] + e3 * scratch.kf[2][id] + e4 * scratch.kf[3][id] +
-            e5 * scratch.kf[4][id] + e6 * scratch.kf[5][id] + e7 * scratch.kf[6][id]);
-        const double errfd = h * (
-            e1 * scratch.kfd[0][id] + e3 * scratch.kfd[2][id] + e4 * scratch.kfd[3][id] +
-            e5 * scratch.kfd[4][id] + e6 * scratch.kfd[5][id] + e7 * scratch.kfd[6][id]);
-        const double errdn = h * (
-            e1 * scratch.kdn[0][id] + e3 * scratch.kdn[2][id] + e4 * scratch.kdn[3][id] +
-            e5 * scratch.kdn[4][id] + e6 * scratch.kdn[5][id] + e7 * scratch.kdn[6][id]);
+        double y5f = f[id];
+        double y5fd = fd[id];
+        double y5dn = deltaN[id];
+        double errf = 0.0;
+        double errfd = 0.0;
+        double errdn = 0.0;
+        for (int s = 0; s < 7; ++s) {
+            const double bs = DP_B[s];
+            const double es = DP_E[s];
+            if (bs != 0.0) {
+                y5f += h * bs * scratch.kf[s][id];
+                y5fd += h * bs * scratch.kfd[s][id];
+                y5dn += h * bs * scratch.kdn[s][id];
+            }
+            if (es != 0.0) {
+                errf += h * es * scratch.kf[s][id];
+                errfd += h * es * scratch.kfd[s][id];
+                errdn += h * es * scratch.kdn[s][id];
+            }
+        }
 
         scratch.ftmp[id] = y5f;
         scratch.fdtmp[id] = y5fd;
@@ -1258,6 +1317,8 @@ double get_phiref() {
 
 // Run main deltaN integration loop
 void run_deltaN_loop(FILE* output_) {
+    // Main deltaN driver with per-mode integrator dispatch.
+    ensure_periodic_index_cache();
     printf("Starting deltaN calculation\n");
     fprintf(output_, "Starting deltaN calculation\n");
 
@@ -1281,54 +1342,63 @@ void run_deltaN_loop(FILE* output_) {
         }
 
         fprintf(output_, "N = %f\n\n", Ne);
-        fflush(output_);
+        if (step_index % output_freq == 0) {
+            fflush(output_);
+        }
     };
 
-    if (deltaN_integrator == INTEGRATOR_LEAPFROG) {
-        while (Ne <= Nend) {
-            evolve_derivsN(dN);
-            evolve_fieldsN(dN);
-            Ne += dN;
-            numsteps++;
-            report_step(numsteps);
-        }
-    } else if (deltaN_integrator == INTEGRATOR_RK4) {
-        while (Ne <= Nend) {
-            rk4_step_deltaN(dN, rk_scratch);
-            Ne += dN;
-            numsteps++;
-            report_step(numsteps);
-        }
-    } else {
-        double h = clamp_rk45_step(dN, rk45_max_dt);
-
-        while (Ne <= Nend) {
-            const double hmax = std::min(rk45_max_dt, std::max(rk45_min_dt, 2.0 * dN));
-            h = clamp_rk45_step(h, hmax);
-
-            bool accepted = false;
-            int attempts = 0;
-            while (!accepted) {
-                double h_suggested = h;
-                accepted = rk45_step_deltaN(h, hmax, h_suggested, rk_scratch);
-                h = h_suggested;
-                attempts++;
-
-                if (!accepted && (attempts > 25 || h <= rk45_min_dt * (1.0 + 1e-12))) {
-                    std::fprintf(stderr,
-                        "RK45 failed to converge in deltaN loop at N=%e, t=%e (attempts=%d, h=%e)\n",
-                        Ne, t, attempts, h);
-                    std::exit(1);
-                }
+    switch (deltaN_integrator) {
+        case INTEGRATOR_LEAPFROG: {
+            while (Ne <= Nend) {
+                evolve_derivsN(dN);
+                evolve_fieldsN(dN);
+                Ne += dN;
+                numsteps++;
+                report_step(numsteps);
             }
+            break;
+        }
+        case INTEGRATOR_RK4: {
+            while (Ne <= Nend) {
+                rk4_step_deltaN(dN, rk_scratch);
+                Ne += dN;
+                numsteps++;
+                report_step(numsteps);
+            }
+            break;
+        }
+        case INTEGRATOR_RK45:
+        default: {
+            double h = clamp_rk45_step(dN, rk45_max_dt);
 
-            Ne += h;
-            numsteps++;
-            report_step(numsteps);
+            while (Ne <= Nend) {
+                const double hmax = rk45_hmax_from_base_step(dN);
+                h = clamp_rk45_step(h, hmax);
+
+                h = rk45_accept_step(
+                    h,
+                    hmax,
+                    [&](double h_trial, double h_limit, double& h_next) {
+                        return rk45_step_deltaN(h_trial, h_limit, h_next, rk_scratch);
+                    },
+                    [&](int attempts, double failed_h) {
+                        std::fprintf(stderr,
+                            "RK45 failed to converge in deltaN loop at N=%e, t=%e (attempts=%d, h=%e)\n",
+                            Ne, t, attempts, failed_h);
+                        std::exit(1);
+                    }
+                );
+
+                Ne += h;
+                numsteps++;
+                report_step(numsteps);
+            }
+            break;
         }
     }
 
     saveN();
+    fflush(output_);
     if (deltaN_uses_staggered_derivatives()) {
         evolve_fieldsN(-0.5 * dN);
     }
@@ -1347,31 +1417,12 @@ struct DerivPack {
 
 // second derivatives on a double field
 inline double d2_same(int dim, int i, int j, int k, const std::vector<double>& A) {
-    int ip = (dim==0? ((i==N-1)? (int)INCREMENT(i) : i+1) : i);
-    int im = (dim==0? ((i==0)  ? (int)DECREMENT(i) : i-1) : i);
-    int jp = (dim==1? ((j==N-1)? (int)INCREMENT(j) : j+1) : j);
-    int jm = (dim==1? ((j==0)  ? (int)DECREMENT(j) : j-1) : j);
-    int kp = (dim==2? ((k==N-1)? (int)INCREMENT(k) : k+1) : k);
-    int km = (dim==2? ((k==0)  ? (int)DECREMENT(k) : k-1) : k);
-
-    if (dim==0) return (A[idx(ip,j,k)] - 2.0*A[idx(i,j,k)] + A[idx(im,j,k)])/(dx*dx);
-    if (dim==1) return (A[idx(i,jp,k)] - 2.0*A[idx(i,j,k)] + A[idx(i,jm,k)])/(dx*dx);
-    return         (A[idx(i,j,kp)] - 2.0*A[idx(i,j,k)] + A[idx(i,j,km)])/(dx*dx);
+    const size_t id = idx(i, j, k);
+    return d2_same_state(dim, i, j, k, id, A);
 }
 
 inline double d2_cross(int d1, int d2, int i, int j, int k, const std::vector<double>& A) {
-    int ip = ((d1==0||d2==0)? ((i==N-1)? (int)INCREMENT(i) : i+1) : i);
-    int im = ((d1==0||d2==0)? ((i==0)  ? (int)DECREMENT(i) : i-1) : i);
-    int jp = ((d1==1||d2==1)? ((j==N-1)? (int)INCREMENT(j) : j+1) : j);
-    int jm = ((d1==1||d2==1)? ((j==0)  ? (int)DECREMENT(j) : j-1) : j);
-    int kp = ((d1==2||d2==2)? ((k==N-1)? (int)INCREMENT(k) : k+1) : k);
-    int km = ((d1==2||d2==2)? ((k==0)  ? (int)DECREMENT(k) : k-1) : k);
-
-    double fpp = A[idx(ip,jp,kp)];
-    double fpm = A[idx(ip,jm,km)];
-    double fmp = A[idx(im,jp,kp)];
-    double fmm = A[idx(im,jm,km)];
-    return (fpp - fpm - fmp + fmm) / (4.0*dx*dx);
+    return d2_cross_state(d1, d2, i, j, k, A);
 }
 
 inline void build_deriv_pack(int i, int j, int k, DerivPack& P) {
@@ -1545,6 +1596,9 @@ void evolve_derivs_post_inflation(double d) {
 // -------------------- Main Post-Inflation Evolution Loop --------------------
 
 void run_post_inflation_loop(FILE* output_) {
+    // Main post-inflation driver:
+    // reuses inflation RK machinery while switching RHS via ScopedPostInflationRhsMode.
+    ensure_periodic_index_cache();
 
     initialize_post_inflation();
 
@@ -1565,59 +1619,65 @@ void run_post_inflation_loop(FILE* output_) {
 
         fprintf(output_, "scale factor a = %f\n", a);
         fprintf(output_, "numsteps %i\n\n", step_index);
-        fflush(output_);
+        if (step_index % output_freq == 0) {
+            fflush(output_);
+        }
     };
 
-    if (post_inflation_integrator == INTEGRATOR_LEAPFROG) {
-        evolve_fields(0.5 * dt_post_inflation);
+    switch (post_inflation_integrator) {
+        case INTEGRATOR_LEAPFROG: {
+            evolve_fields(0.5 * dt_post_inflation);
 
-        while (a <= af_post_inflation) {
-            const double dt_rescaled = dt_post_inflation;
-            evolve_derivs_post_inflation(dt_rescaled);
-            evolve_fields(dt_rescaled);
+            while (a <= af_post_inflation) {
+                evolve_derivs_post_inflation(dt_post_inflation);
+                evolve_fields(dt_post_inflation);
 
-            numsteps++;
-            report_step(numsteps);
-        }
-    } else if (post_inflation_integrator == INTEGRATOR_RK4) {
-        g_use_post_inflation_rhs = true;
-        while (a <= af_post_inflation) {
-            rk4_step_inflation(dt_post_inflation, rk_scratch);
-            numsteps++;
-            report_step(numsteps);
-        }
-        g_use_post_inflation_rhs = false;
-    } else {
-        g_use_post_inflation_rhs = true;
-        double h = clamp_rk45_step(dt_post_inflation, rk45_max_dt);
-
-        while (a <= af_post_inflation) {
-            const double hmax = std::min(rk45_max_dt, std::max(rk45_min_dt, 2.0 * dt_post_inflation));
-            h = clamp_rk45_step(h, hmax);
-
-            bool accepted = false;
-            int attempts = 0;
-            while (!accepted) {
-                double h_suggested = h;
-                accepted = rk45_step_inflation(h, hmax, h_suggested, rk_scratch);
-                h = h_suggested;
-                attempts++;
-
-                if (!accepted && (attempts > 25 || h <= rk45_min_dt * (1.0 + 1e-12))) {
-                    std::fprintf(stderr,
-                        "RK45 failed to converge in post-inflation at a=%e, t=%e (attempts=%d, h=%e)\n",
-                        a, t, attempts, h);
-                    std::exit(1);
-                }
+                numsteps++;
+                report_step(numsteps);
             }
-
-            numsteps++;
-            report_step(numsteps);
+            break;
         }
-        g_use_post_inflation_rhs = false;
+        case INTEGRATOR_RK4: {
+            const ScopedPostInflationRhsMode post_rhs_mode(true);
+            while (a <= af_post_inflation) {
+                rk4_step_inflation(dt_post_inflation, rk_scratch);
+                numsteps++;
+                report_step(numsteps);
+            }
+            break;
+        }
+        case INTEGRATOR_RK45:
+        default: {
+            const ScopedPostInflationRhsMode post_rhs_mode(true);
+            double h = clamp_rk45_step(dt_post_inflation, rk45_max_dt);
+
+            while (a <= af_post_inflation) {
+                const double hmax = rk45_hmax_from_base_step(dt_post_inflation);
+                h = clamp_rk45_step(h, hmax);
+
+                h = rk45_accept_step(
+                    h,
+                    hmax,
+                    [&](double h_trial, double h_limit, double& h_next) {
+                        return rk45_step_inflation(h_trial, h_limit, h_next, rk_scratch);
+                    },
+                    [&](int attempts, double failed_h) {
+                        std::fprintf(stderr,
+                            "RK45 failed to converge in post-inflation at a=%e, t=%e (attempts=%d, h=%e)\n",
+                            a, t, attempts, failed_h);
+                        std::exit(1);
+                    }
+                );
+
+                numsteps++;
+                report_step(numsteps);
+            }
+            break;
+        }
     }
 
     printf("Saving final inflaton data\n");
+    fflush(output_);
     save_post_inflation(1);
     // Note: save_post_inflation() performs a temporary sync/desync for output.
     // Leave the integrator state unchanged here.

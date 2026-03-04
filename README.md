@@ -64,6 +64,23 @@ Run this command to ensure the code compiles cleanly from source:
 make clean && make
 ```
 
+### Optional Performance Flags
+
+The default build is portable across machines. Two optional flags can be enabled for local speedups:
+
+```bash
+# CPU-specific code generation (non-portable binary)
+make ENABLE_NATIVE=1
+
+# Link-time optimization
+make ENABLE_LTO=1
+
+# Combined
+make ENABLE_NATIVE=1 ENABLE_LTO=1
+```
+
+`ENABLE_NATIVE=1` may produce faster binaries on the build machine, but the executable may not run on different CPU architectures.
+
 ## Running the Simulation
 
 ### Input Setup
@@ -148,6 +165,25 @@ All quantities are given in **reduced Planck units**, where $M_{\mathrm{Pl}}^{\t
   - full `params.txt` used for the run (run-time)
   - whether OpenMP was enabled
 - Main run metadata is written by the code to `results/info.dat`.
+
+## Developer Notes (Numerics Contract)
+
+If you modify `src/evolution.cpp`, keep these invariants unchanged unless you intentionally redesign the algorithm:
+
+- Periodic finite-difference stencils for all lattice derivatives.
+- Leapfrog staggering semantics (half-step synchronization only at output boundaries).
+- RK45 acceptance logic based on weighted RMS error with `rk45_abs_tol`/`rk45_rel_tol`.
+- Existing output schema (`results/*.dat` and `results/post_inflation/*.dat`) used by analysis scripts.
+
+### Regression Check (main vs current branch)
+
+Use the included regression to compare against `main` at `N=16`:
+
+```bash
+python3 tests/regression_main_n16.py --repo . --main-ref main --params params.numerical.txt --integrators leapfrog,rk45
+```
+
+This checks representative outputs for both integrators and reports mismatches with max absolute/relative differences.
 
 ## Jupyter Notebook
 
