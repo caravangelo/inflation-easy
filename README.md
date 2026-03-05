@@ -180,10 +180,10 @@ If you modify `src/evolution.cpp`, keep these invariants unchanged unless you in
 Use the included regression to compare against `main` at `N=16`:
 
 ```bash
-python3 tests/regression_main_n16.py --repo . --main-ref main --params params.numerical.txt --integrators leapfrog,rk45
+python3 tests/regression_main_n16.py --repo . --main-ref main --params params.numerical.txt --integrators leapfrog,rk4,rk45
 ```
 
-This checks representative outputs for both integrators and reports mismatches with max absolute/relative differences.
+This checks representative outputs for all requested integrators and reports mismatches with max absolute/relative differences.
 
 ## Jupyter Notebook
 

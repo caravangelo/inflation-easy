@@ -241,13 +241,13 @@ An inverse discrete Fourier transform is then applied to obtain the real-space f
 
 \subsection{Time integration and \texorpdfstring{$\delta N$}{deltaN} calculation}
 
-Once the initial conditions are specified, the system evolves under the equations of motion \cref{eq:eoms}. The default option is the same of \texttt{LATTICEEASY}: a second-order symplectic scheme in which the field $\phi(\vec{n})$ and its velocity $\partial_{\tilde\tau} \phi(\vec{n})$ are stored at half-step offsets in time. Because the leapfrog method is standard, we refer the reader to the documentation of \texttt{LATTICEEASY}~\cite{latticeeasy} for details. The code also supports an RK4 integrator and an adaptive RK45 integrator, selectable in \texttt{params.txt}. 
+Once the initial conditions are specified, the system evolves under the equations of motion \cref{eq:eoms}. The default option is the same as in \texttt{LATTICEEASY}: a second-order symplectic leapfrog scheme in which the field $\phi(\vec{n})$ and its velocity $\partial_{\tilde\tau} \phi(\vec{n})$ are stored at half-step offsets in time. Because leapfrog is standard, we refer the reader to the documentation of \texttt{LATTICEEASY}~\cite{latticeeasy} for details. The code also supports RK4 and adaptive RK45 integrators. The integrator can be selected in \texttt{params.txt}.
 
-An improvement in \texttt{InflationEasy} is the use of an adaptive timestep. Instead of evolving with a constant $\Delta \tilde{\tau}$, we scale the timestep dynamically as
+In leapfrog and RK4 modes, the baseline step is rescaled dynamically as
 \begin{equation}
 \Delta \tilde{\tau} = \Delta \tilde{\tau}_{\rm in} \, a^{s-1},
 \end{equation}
-which corresponds to a constant timestep in cosmic time $t$. This adaptation improves the numerical stability of the equations.
+which corresponds to a constant timestep in cosmic time $t$. In RK45 mode, this quantity is used as a reference scale for the adaptive controller, while the accepted step is adjusted by the local error estimate and constrained by the RK45 run-time bounds.
 
 The simulation stops when the scale factor reaches a final value set by the user in the configuration file (see \cref{sec:configuring}). At this point, \texttt{InflationEasy} outputs statistical summaries of the simulation. After the main evolution, the code optionally performs a $\delta N$ calculation to extract the comoving curvature perturbation $\zeta$. Formally, $\delta N$ is defined between an initial flat slice and a final uniform-total-energy slice. In the implementation, this final slice is approximated by the local time delay in reaching a reference field value $\phi_{\rm ref}$:
 \begin{equation}
@@ -269,6 +269,7 @@ For further details on the $\delta N$ approach, including the distinction betwee
 
  \begin{figure}[htbp]
   \centering
+  \scalebox{0.92}{
   \begin{tikzpicture}
     % Column positions (left, right)
     \def\xA{0}
@@ -291,6 +292,7 @@ For further details on the $\delta N$ approach, including the distinction betwee
     \node at (\xA+0.2,\yC) {\includegraphics[width=6.9cm]{PDF.pdf}};
     \node at (\xB+0.4,\yC) {\includegraphics[width=5cm]{snapshot.pdf}};
   \end{tikzpicture}
+  }
   \caption{Example of typical outputs from the lattice simulation. \textbf{Top:} Evolution of the spatial average of the inflaton field and its velocity as a function of the number of $e$-folds $N$. \textbf{Middle:} Left panel shows the evolution of the different energy components in the lattice; right panel displays the power spectrum of the curvature perturbation $\zeta$, computed both via the linear relation and the $\delta N$ method. \textbf{Bottom:} Left panel shows the probability distribution function (PDF) of $\zeta$; right panel shows a 2D slice of the final $\zeta$ field in position space. These outputs correspond to the default example in the code—namely, the ultra-slow-roll (USR) potential producing a peak in the power spectrum—run on a lattice with $N^3_{\rm pts} = 128^3$ points. These plots are generated using the example notebook \texttt{{plot.ipynb}}, included in the public release under the \texttt{notebooks/} directory.}
   \label{fig}
 \end{figure}
@@ -485,6 +487,20 @@ dt = 0.001
 
 The time step must be small enough to ensure stability and accuracy. A good practice is to rerun the simulation with different values of \texttt{dt} and check that the results remain unchanged. These convergence tests can be performed, at first, on small grids (e.g., $64^3$) to save time in determining a reasonable range of $dt$ values. If the adaptive RK45 integrator is selected, this fixed \texttt{dt} choice is effectively overridden by the RK45 step-control parameters.
 
+Integrator choices and RK45 controls are specified at run time as
+\begin{lstlisting}[language=bash,numbers=none]
+inflation_integrator = leapfrog
+deltaN_integrator = leapfrog
+post_inflation_integrator = leapfrog
+
+rk45_abs_tol = 1e-8
+rk45_rel_tol = 1e-6
+rk45_min_dt = ...
+rk45_max_dt = ...
+rk45_safety = 0.9
+\end{lstlisting}
+where each integrator entry accepts \texttt{leapfrog}, \texttt{rk4}, or \texttt{rk45}. The RK45 parameters are used by any loop running in RK45 mode.
+
 The time step and final time for the $\delta N$ calculation are specified separately:
 \begin{lstlisting}[language=bash,numbers=none]
 dN = 0.0000001
@@ -492,7 +508,15 @@ Nend = 0.001
 \end{lstlisting}
 Choosing these parameters requires some care. The step size \texttt{dN} must be small enough to resolve the evolution of the separate-universe equation (\cref{eq:eom_deltaN}). As a rule of thumb, it should be much smaller than the expected amplitude of the curvature perturbation, i.e. $\delta N \ll \sqrt{\mathcal{P}_{\zeta}}$. For very small $\mathcal{P}_{\zeta}$, the required step size becomes prohibitively small, and the $\delta N$ calculation is typically unnecessary—nonlinear effects are only important for $\mathcal{P}_{\zeta} \gtrsim 10^{-4}$, as shown in~\cite{Caravano:2025diq}.
 
-The final time \texttt{Nend} should be long enough for all lattice points to reach a common final constant-field hypersurface $\phi_{\rm ref}$. The stopping logic depends on compile-time flags in \texttt{parameters.h} (\texttt{monotonic\_potential} and \texttt{antimonotonic\_potential}), which specify whether the potential is monotonic, anti-monotonic, or neither in the relevant region. If this behavior is clear, the code can use a faster field-based stopping test. If the potential does not have a clear monotonicity in that region, set both flags to \texttt{0}: the code still handles the evolution correctly using the generic potential-based test, but this check is typically a bit slower. This choice approximates a uniform-energy final slice when the dynamics is close to an attractor, but it may be problematic in non-attractor regimes or in models with multiple minima/extended plateaus. In such cases, the user can manually define the hypersurface by uncommenting the following line:
+The final time \texttt{Nend} should be long enough for all lattice points to reach a common final constant-field hypersurface $\phi_{\rm ref}$.
+The stopping logic uses compile-time flags in \texttt{parameters.h}.
+For monotonic regions, set \texttt{monotonic\_potential} to \texttt{1}.
+For anti-monotonic regions, set \texttt{antimonotonic\_potential} to \texttt{1}.
+If this behavior is clear, the code can use a faster field-based stopping test.
+
+If the potential does not have a clear monotonicity in that region, set both flags to \texttt{0}: the code still handles the evolution correctly using the generic potential-based test, but this check is typically a bit slower.
+This choice approximates a uniform-energy final slice when the dynamics is close to an attractor, but it may be problematic in non-attractor regimes or in models with multiple minima or extended plateaus.
+In such cases, the user can manually define the hypersurface by uncommenting the following line:
 \begin{lstlisting}[language=bash,numbers=none]
 use_phiref_manual = 1
 phiref_manual_value = 2.68
@@ -670,7 +694,7 @@ In the public release of \texttt{InflationEasy} we adopt the normalization $C=1$
 \subsection{Numerical implementation}
 \label{sec:GW_numerics}
 
-The gravitational-wave sector is evolved on the same three-dimensional lattice and with the same leapfrog time integrator used for the scalar field. The code evolves the six independent components of a symmetric tensor $h_{ij}(\eta,\vec{x})$ in real space and applies the transverse--traceless (TT) projection only when constructing Fourier-space observables. This real-space strategy for computing scalar-induced gravitational waves was first proposed in~\cite{Garcia-Bellido:2007fiu} and has become standard in lattice-based calculations. 
+The gravitational-wave sector is evolved on the same three-dimensional lattice and with the same time-integration choice used for the scalar field in each stage (leapfrog, RK4, or RK45, depending on run-time settings). The code evolves the six independent components of a symmetric tensor $h_{ij}(\eta,\vec{x})$ in real space and applies the transverse--traceless (TT) projection only when constructing Fourier-space observables. This real-space strategy for computing scalar-induced gravitational waves was first proposed in~\cite{Garcia-Bellido:2007fiu} and has become standard in lattice-based calculations. 
 
 Rather than evolving the explicitly projected variable $h_{ij}^{\rm TT}$, the code evolves the unconstrained tensor $h_{ij}$ according to
 \begin{equation}
@@ -719,15 +743,16 @@ The code stores the tensor time derivatives in the same rescaled time coordinate
 
 \subsubsection*{Activating the GW calculation}
 
-The computation of SIGWs is controlled by both compile-time and run-time parameters: feature activation is compile-time in \texttt{parameters.h}, while run-time settings (e.g.\ equation-of-state and integration controls) are set in \texttt{params.txt}.
-For the post-inflation stage, the final scale factor can be set with
+The computation of SIGWs is controlled by both compile-time and run-time parameters: feature activation is compile-time in \texttt{parameters.h}, while run-time settings (e.g.\ equation-of-state and integration controls) are set in \texttt{params.txt}. For the post-inflation stage, the step size, integrator, and final scale factor can be set with
 \begin{lstlisting}[language=bash,numbers=none]
+dt_post_inflation = ...
+post_inflation_integrator = leapfrog
 af_post_inflation = ...
 \end{lstlisting}
-If this entry is omitted, the default is also
-\[
+If \texttt{af\_post\_inflation} is omitted, the default is
+$
 a_f^{\rm post} = 2N_{\rm pts}.
-\]
+$
 
 \subsubsection*{Outputs}
 

@@ -169,8 +169,8 @@ def main() -> int:
     ap.add_argument("--params", default="params.numerical.txt", help="Runtime params template from repo root")
     ap.add_argument(
         "--integrators",
-        default="leapfrog,rk45",
-        help="Comma-separated integrators to test (e.g. leapfrog,rk45,rk4)",
+        default="leapfrog,rk4,rk45",
+        help="Comma-separated integrators to test (e.g. leapfrog,rk4,rk45)",
     )
     ap.add_argument("--rtol", type=float, default=1e-10)
     ap.add_argument("--atol", type=float, default=1e-12)
