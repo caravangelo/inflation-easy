@@ -151,6 +151,7 @@ static void write_isotropic_spectrum_from_fft_r2c(
 }
 
 
+#if perform_deltaN
 // Construct δN (linear mapping) in-place in deltaN.
 static void build_deltaN_linear()
 {
@@ -195,6 +196,7 @@ static void build_deltaN_log()
         }
     }
 }
+#endif
 
 
 
