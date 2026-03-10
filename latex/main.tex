@@ -57,7 +57,7 @@
 
 
 \abstract{
-\href{https://github.com/caravangelo/inflation-easy.git}{\texttt{InflationEasy}} is a lattice code specifically developed for cosmological inflation. It simulates the nonlinear dynamics of a scalar field on a three-dimensional lattice in an expanding FLRW universe using finite-difference spatial derivatives. Based in part on the well-known \texttt{LATTICEEASY}, it incorporates several features tailored specifically to inflationary applications, including a nonperturbative $\delta N$ method to compute the curvature perturbation at the end of inflation $\zeta$ directly from the lattice. In addition to the scalar sector, the code can also simulate scalar-induced gravitational waves, accounting for contributions generated both during inflation and during the subsequent horizon re-entry of scalar perturbations, and enabling the computation of the resulting stochastic gravitational-wave background. \texttt{InflationEasy} enables fully nonlinear studies of regimes with large fluctuations or nonperturbative non-Gaussianities, which lie beyond the reach of standard perturbation theory. It is applicable to a broad range of inflationary models, including those relevant for primordial black hole formation, gravitational-wave production, and large-scale structure.
+\href{https://github.com/caravangelo/inflation-easy.git}{\texttt{InflationEasy}} is a lattice code specifically developed for cosmological inflation. It simulates the nonlinear dynamics of a scalar field on a three-dimensional lattice in an expanding FLRW universe using finite-difference spatial derivatives. Based in part on the well-known \texttt{LATTICEEASY}, it incorporates several features tailored specifically to inflationary applications, including a nonperturbative $\delta N$ method to compute the curvature perturbation at the end of inflation $\zeta$ directly from the lattice. In addition to the scalar sector, the code can also simulate scalar-induced gravitational waves, accounting for contributions generated both during inflation and during the subsequent horizon re-entry of scalar perturbations, and enabling the computation of the resulting gravitational-wave background. \texttt{InflationEasy} enables fully nonlinear studies of regimes with large fluctuations or nonperturbative non-Gaussianities, which lie beyond the reach of standard perturbation theory. It is applicable to a broad range of inflationary models, including those relevant for primordial black hole formation, gravitational-wave production, and large-scale structure.
 
 
 }
@@ -375,9 +375,19 @@ The code includes two default potential options:
 \end{itemize}
 By default, the code runs with the numerical USR potential on a lattice of size $N_{\rm pts}^3 = 128^3$ and runs until the scale factor reaches $a=2N_{\rm pts}=256$ (where $a=1$ at the beginning of the simulation), corresponding to $N = \log(256) \simeq 5.5$ e-folds of evolution. The total number of $e$-folds must be chosen based on the spatial resolution, which ultimately dictates the maximum running time of the simulation. See the next section for how to set the total number of e-folds for a given lattice size.
 
-Running this benchmark code, including the $\delta N$ calculation to compute $\zeta$ from the lattice (but excluding the gravitational-wave calculation of \cref{sec:GW}), on a machine with an Intel(R) Core(TM) i5-1038NG7 CPU @ 2.00\,GHz and 16\,GB RAM, compiled with \texttt{Apple clang 16.0.0}, takes 14 minutes and 20 seconds. Without the $\delta N$ calculation, it takes 8 minutes and 45 seconds. This timing refers to the unparallelized version of the code. If OpenMP is available on your system, you can expect improved performance depending on the number of cores.
-
 In \cref{fig}, we show the outputs of the code for the default example with a USR potential. These plots are generated using the example Python notebook \texttt{{plot.ipynb}} located in the \texttt{{notebooks}} directory. They display lattice outputs such as background quantities $\langle \phi \rangle$ and $\langle \dot{\phi} \rangle$, energy components, the power spectrum of $\zeta$, its 1-point probability distribution function (PDF), and a 2D snapshot of $\zeta$ in real space.
+
+\subsubsection*{Running time}
+
+For the numerical USR default example distributed with this release, the following wall-clock times provide a reference benchmark for a $128^3$ lattice. Measurements were obtained on an Apple M3 Max (14 CPU cores, 36\,GB RAM), macOS 26.3, compiled with \texttt{Homebrew clang 21.1.2}, with OpenMP enabled and \texttt{OMP\_NUM\_THREADS=14}:
+\begin{itemize}
+    \item inflation only simulation, no $\delta N$ calculation, no GWs: $183.49\,\mathrm{s}$ ($3$ min $3$ s);
+    \item inflation + $\delta N$, no GWs: $248.52\,\mathrm{s}$ ($4$ min $9$ s);
+    \item inflation only, no $\delta N$, with inflationary GWs: $470.45\,\mathrm{s}$ ($7$ min $50$ s);
+    \item full run (inflation + $\delta N$ + post-inflation + inflationary and post-inflationary GWs): $577.65\,\mathrm{s}$ ($9$ min $38$ s).
+\end{itemize}
+
+
 
 \subsubsection*{Switching}
 Switching between the two defaults requires two explicit steps.
@@ -526,7 +536,7 @@ When enabled, the $\delta N$ calculation will use the manually specified referen
 \section{Scalar-induced gravitational waves}
 \label{sec:GW}
 
-\texttt{InflationEasy} supports the calculation of scalar-induced gravitational waves (SIGWs), i.e.\ tensor perturbations generated at second order by scalar fluctuations~\cite{Tomita:1975kj,Matarrese:1993zf,Acquaviva:2002ud,Mollerach:2003nq,Ananda:2006af,Baumann:2007zm}. The code computes two physically distinct contributions to the resulting gravitational-wave background. One contribution is generated during inflation by the nonlinear dynamics of the inflaton field, while the other is generated after inflation, when the scalar perturbations produced during inflation re-enter the horizon in the post-inflationary phase. An overview of the computational pipeline and of the stages at which these contributions are generated is shown schematically in \cref{fig:gwpipeline}. While this section focuses on the numerical implementation in \texttt{InflationEasy}, the underlying physical framework and detailed discussion are presented in the companion physics paper~\cite{gwpaper}.
+\texttt{InflationEasy} supports the calculation of scalar-induced gravitational waves (SIGWs), i.e.\ tensor perturbations generated at second order by scalar fluctuations~\cite{Tomita:1975kj,Matarrese:1993zf,Acquaviva:2002ud,Mollerach:2003nq,Ananda:2006af,Baumann:2007zm}. The code computes two physically distinct contributions to the resulting gravitational-wave (GW) background. One contribution is generated during inflation by the nonlinear dynamics of the inflaton field, while the other is generated after inflation, when the scalar perturbations produced during inflation re-enter the horizon in the post-inflationary phase. An overview of the computational pipeline and of the stages at which these contributions are generated is shown schematically in \cref{fig:gwpipeline}. While this section focuses on the numerical implementation in \texttt{InflationEasy}, the underlying physical framework and detailed discussion are presented in the companion physics paper~\cite{gwpaper}.
 
 \begin{figure}
     \centering
@@ -551,9 +561,9 @@ a^2(\eta)\left[
 + \left(\delta_{ij} + C\,h_{ij}(\eta,\vec{x})\right) dx^i dx^j
 \right],
 \end{equation}
-where $\eta$ denotes conformal time and $h_{ij}$ is a symmetric tensor encoding the gravitational-wave degrees of freedom.
+where $\eta$ denotes conformal time and $h_{ij}$ is a symmetric tensor encoding the GW degrees of freedom.
 
-In the public release of \texttt{InflationEasy}, we adopt the convention $C=1$. In the companion physics paper~\cite{gwpaper}, tensor perturbations are instead defined with $C=1/2$. We keep the factor $C$ explicit when defining observable quantities, in order to make the relation between the two conventions transparent. Physical observables quadratic in $h_{ij}$, such as the gravitational-wave energy density, scale as $C^2$.
+In the public release of \texttt{InflationEasy}, we adopt the convention $C=1$. In the companion physics paper~\cite{gwpaper}, tensor perturbations are instead defined with $C=1/2$. We keep the factor $C$ explicit when defining observable quantities, in order to make the relation between the two conventions transparent. Physical observables quadratic in $h_{ij}$, such as the GW energy density, scale as $C^2$.
 
 
 \subsubsection*{Tensor evolution equation}
@@ -611,7 +621,7 @@ S_{ij}^{(\rm infl)}
 \partial_i \phi(\eta,\vec{x})\,
 \partial_j \phi(\eta,\vec{x}),
 \end{equation}
-where $\phi$ is the canonical inflaton field evolved on the lattice (see \cref{sec:eoms,sec:implementation}). This contribution captures gravitational waves sourced during inflation by the nonlinear dynamics of the inflaton field.
+where $\phi$ is the canonical inflaton field evolved on the lattice (see \cref{sec:eoms,sec:implementation}). This contribution captures GWs sourced during inflation by the nonlinear dynamics of the inflaton field.
 
 \subsection{Post-inflationary SIGWs}
 
@@ -648,7 +658,7 @@ S_{ij}^{(\rm post)}
 which coincides with the standard second-order Newtonian-gauge source used in analytical and semi-analytical calculations of SIGWs. The post-inflation evolution is analogous to the one used in~\cite{Ning:2026nfs}.\footnote{In Ref.~\cite{Ning:2026nfs}, the initial conditions are generated using an analytic local ansatz for the curvature perturbation, $\zeta = F(\zeta_g)$, rather than being obtained from a dynamical evolution.}
 
 \paragraph{Assumptions and limitations.}
-The post-inflationary calculation relies on a number of standard approximations. The background expansion is fixed and described by a perfect fluid with constant equation of state $w$, metric backreaction from tensor modes is neglected, and the scalar sector is evolved linearly at the level of the Newtonian potential $\Phi$. At the same time, in contrast to standard semi-analytical approaches, the initial conditions for the post-inflationary evolution are taken directly from the lattice simulation of inflation. As a result, all non-Gaussian features of the primordial curvature perturbation are retained to all orders and consistently propagated into the gravitational-wave source. A detailed discussion of these assumptions, as well as of their validity and limitations, is given in the companion physics paper~\cite{gwpaper}.
+The post-inflationary calculation relies on a number of standard approximations. The background expansion is fixed and described by a perfect fluid with constant equation of state $w$, metric backreaction from tensor modes is neglected, and the scalar sector is evolved linearly at the level of the Newtonian potential $\Phi$. At the same time, in contrast to standard semi-analytical approaches, the initial conditions for the post-inflationary evolution are taken directly from the lattice simulation of inflation. As a result, all non-Gaussian features of the primordial curvature perturbation are retained to all orders and consistently propagated into the GW source. A detailed discussion of these assumptions, as well as of their validity and limitations, is given in the companion physics paper~\cite{gwpaper}.
 
 \subsection{Tensor spectra and gravitational-wave energy density}
 The tensor power spectra are defined through
@@ -659,7 +669,7 @@ The tensor power spectra are defined through
 \langle h_{ij}^{{\rm TT}\,\prime}(\eta,\vec{k})\, h_{ij}^{{\rm TT}\,\prime}(\eta,\vec{k}') \rangle
 &= (2\pi)^3 \delta^{(3)}(\vec{k}+\vec{k}')\, P_{h'}(\eta,k).
 \end{align}
-From these spectra we define the gravitational-wave energy density per logarithmic interval as
+From these spectra we define the GW energy density per logarithmic interval as
 \begin{equation}
 \label{eq:GW_rho}
 \frac{d\rho_{\rm GW}}{d\ln k}
@@ -681,7 +691,7 @@ and the corresponding fractional energy density as
 P_{h'}(\eta,k) + k^2 P_h(\eta,k)
 \right].
 \end{equation}
-These expressions are used throughout to characterize the gravitational-wave signal generated both during inflation and in the post-inflationary phase. The quantity $\Omega_{\rm GW}$ admits its usual interpretation as a physical energy density once the corresponding modes are well inside the horizon, while the spectra $P_h$ and $P_{h'}$ are directly constructed from the lattice evolution at all times. The energy density spectrum $\Omega_{\rm GW}(k)$ is evaluated at the time of the calculation; to relate it to the present-day stochastic background, one typically assumes a standard thermal history. For example, if the gravitational waves are emitted during radiation domination, as in the case studied in \cite{gwpaper}, the present-day value can be estimated as
+These expressions are used throughout to characterize the GW signal generated both during inflation and in the post-inflationary phase. The quantity $\Omega_{\rm GW}$ admits its usual interpretation as a physical energy density once the corresponding modes are well inside the horizon, while the spectra $P_h$ and $P_{h'}$ are directly constructed from the lattice evolution at all times. The energy density spectrum $\Omega_{\rm GW}(k)$ is evaluated at the time of the calculation; to relate it to the present-day stochastic background, one typically assumes a standard thermal history. For example, if the GWsare emitted during radiation domination, as in the case studied in \cite{gwpaper}, the present-day value can be estimated as
 \[
 \Omega_{\rm GW,0}(k)\;\simeq\;\Omega_{\rm GW}(k)\,\Omega_{r,0},
 \]
@@ -694,7 +704,7 @@ In the public release of \texttt{InflationEasy} we adopt the normalization $C=1$
 \subsection{Numerical implementation}
 \label{sec:GW_numerics}
 
-The gravitational-wave sector is evolved on the same three-dimensional lattice and with the same time-integration choice used for the scalar field in each stage (leapfrog, RK4, or RK45, depending on run-time settings). The code evolves the six independent components of a symmetric tensor $h_{ij}(\eta,\vec{x})$ in real space and applies the transverse--traceless (TT) projection only when constructing Fourier-space observables. This real-space strategy for computing scalar-induced gravitational waves was first proposed in~\cite{Garcia-Bellido:2007fiu} and has become standard in lattice-based calculations. 
+The GW sector is evolved on the same three-dimensional lattice and with the same time-integration choice used for the scalar field in each stage (leapfrog, RK4, or RK45, depending on run-time settings). The code evolves the six independent components of a symmetric tensor $h_{ij}(\eta,\vec{x})$ in real space and applies the transverse--traceless (TT) projection only when constructing Fourier-space observables. This real-space strategy for computing scalar-induced GWs was first proposed in~\cite{Garcia-Bellido:2007fiu} and has become standard in lattice-based calculations. 
 
 Rather than evolving the explicitly projected variable $h_{ij}^{\rm TT}$, the code evolves the unconstrained tensor $h_{ij}$ according to
 \begin{equation}
@@ -732,7 +742,7 @@ The TT projection is implemented at the level of the power spectrum by contracti
 \begin{equation}
 h_{ij}^{\rm TT}(\eta,\vec{k})=\Lambda_{ij}^{\ \ \ell m}(\hat{k})\,h_{\ell m}(\eta,\vec{k}),
 \end{equation}
-and accumulates the squared norm $h_{ij}^{\rm TT}(\eta,\vec{k})\,h_{ij}^{\rm TT}(\eta,-\vec{k})$ into spherical bins in $|\vec{k}|$. As in the scalar sector, the bin centers are associated with the average effective momentum of the modes contributing to each bin (cf.\ \texttt{modes.dat} and the discussion in \cref{sec:output}). The code outputs gravitational-wave spectra only up to 80\% of the Nyquist frequency to avoid bins dominated by ultraviolet lattice artifacts.
+and accumulates the squared norm $h_{ij}^{\rm TT}(\eta,\vec{k})\,h_{ij}^{\rm TT}(\eta,-\vec{k})$ into spherical bins in $|\vec{k}|$. As in the scalar sector, the bin centers are associated with the average effective momentum of the modes contributing to each bin (cf.\ \texttt{modes.dat} and the discussion in \cref{sec:output}). The code outputs GW spectra only up to 80\% of the Nyquist frequency to avoid bins dominated by ultraviolet lattice artifacts.
 
 \subsubsection*{Time derivatives and code-unit conversion}
 
@@ -778,7 +788,7 @@ The following files may be generated:
     \path{post_inflation/spectra.dat} and \path{post_inflation/spectratimes.dat}.
     These contain the power spectrum of the Newtonian potential $\Phi$, stored as a concatenated list of spectra evaluated at different times, and the corresponding evaluation times.
 \end{itemize}
- From these outputs, one can directly construct the dimensionless tensor power spectrum $\Delta_h^2(k)$ and the gravitational-wave energy density spectrum $\Omega_{\rm GW}(k)$ using \cref{eq:GW_Omega}, together with the background quantities $a(\eta)$ and $\mathcal{H}(\eta)$ provided in \path{sf.dat} and \path{sf_post.dat}. Figure~\ref{fig:gw} shows a typical example of the resulting post-inflationary tensor spectra. An explicit example illustrating how to compute $\Omega_{\rm GW}$ from the raw output files and reproduce these plots is provided in the example notebook included with the public release.
+ From these outputs, one can directly construct the dimensionless tensor power spectrum $\Delta_h^2(k)$ and the GW energy density spectrum $\Omega_{\rm GW}(k)$ using \cref{eq:GW_Omega}, together with the background quantities $a(\eta)$ and $\mathcal{H}(\eta)$ provided in \path{sf.dat} and \path{sf_post.dat}. Figure~\ref{fig:gw} shows a typical example of the resulting post-inflationary tensor spectra. An explicit example illustrating how to compute $\Omega_{\rm GW}$ from the raw output files and reproduce these plots is provided in the example notebook included with the public release.
 
 \begin{figure}
     \centering
