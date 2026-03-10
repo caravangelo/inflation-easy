@@ -30,6 +30,10 @@
 // 1: extend SIGW computation to a post-inflationary phase.
 #define post_inflation 1
 
+#if post_inflation && !calculate_SIGW
+#error "post_inflation requires calculate_SIGW = 1"
+#endif
+
 // 1: enable OpenMP parallelism in selected loops (requires compiler support).
 #define parallel_calculation 1
 

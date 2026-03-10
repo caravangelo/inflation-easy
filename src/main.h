@@ -137,7 +137,9 @@ extern std::vector<double> potential_derivative_numerical;
 // Initialization routines.
 void initialize();
 void initializef();
+#if calculate_SIGW
 void initializeGW();
+#endif
 void initialize_simulation();
 void initializeN();
 void initialize_post_inflation();
