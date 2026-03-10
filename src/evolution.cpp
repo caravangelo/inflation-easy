@@ -18,42 +18,16 @@
 // - RK45 acceptance based on weighted RMS norm with abs/rel tolerances.
 // - Output formats and file names consumed by downstream analysis scripts.
 
-namespace {
-// Precomputed periodic neighbors (i+1 mod N, i-1 mod N), reused in hot stencils.
-std::vector<int> g_periodic_inc;
-std::vector<int> g_periodic_dec;
-
-inline void ensure_periodic_index_cache() {
-    if (static_cast<int>(g_periodic_inc.size()) == N &&
-        static_cast<int>(g_periodic_dec.size()) == N) {
-        return;
-    }
-
-    g_periodic_inc.resize(N);
-    g_periodic_dec.resize(N);
-    for (int i = 0; i < N; ++i) {
-        g_periodic_inc[i] = (i == N - 1) ? 0 : i + 1;
-        g_periodic_dec[i] = (i == 0) ? N - 1 : i - 1;
-    }
-}
-} // namespace
-
 // -------------------- Laplacians --------------------
 
 // Helper for periodic indexing
 inline int INCREMENT(int i) {
-    if (static_cast<int>(g_periodic_inc.size()) != N) {
-        ensure_periodic_index_cache();
-    }
-    return g_periodic_inc[i];
+    return (i == N - 1) ? 0 : i + 1;
 }
 
 // Decrement index with periodic wrapping (i → i-1 mod N)
 inline int DECREMENT(int i) {
-    if (static_cast<int>(g_periodic_dec.size()) != N) {
-        ensure_periodic_index_cache();
-    }
-    return g_periodic_dec[i];
+    return (i == 0) ? N - 1 : i - 1;
 }
 
 // Laplacian for real-space arrays (works for double or float vectors)
@@ -937,7 +911,6 @@ void run_evolution_loop(FILE* output_) {
     // - selects integrator backend
     // - performs periodic outputs/logging
     // - guarantees final saved state is synchronized for output
-    ensure_periodic_index_cache();
     int numsteps = 0;
 
     InflationRKScratch rk_scratch;
@@ -1317,7 +1290,6 @@ double get_phiref() {
 // Run main deltaN integration loop
 void run_deltaN_loop(FILE* output_) {
     // Main deltaN driver with per-mode integrator dispatch.
-    ensure_periodic_index_cache();
     printf("Starting deltaN calculation\n");
     fprintf(output_, "Starting deltaN calculation\n");
 
@@ -1596,8 +1568,6 @@ void evolve_derivs_post_inflation(double d) {
 void run_post_inflation_loop(FILE* output_) {
     // Main post-inflation driver:
     // reuses inflation RK machinery while switching RHS via ScopedPostInflationRhsMode.
-    ensure_periodic_index_cache();
-
     initialize_post_inflation();
 
     int numsteps = 0;
