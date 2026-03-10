@@ -941,7 +941,6 @@ void run_evolution_loop(FILE* output_) {
     int numsteps = 0;
 
     InflationRKScratch rk_scratch;
-    rk_scratch.ensure_size(f.size());
 
     const auto report_step = [&](int step_index) {
         if (step_index % output_freq == 0 && a < af) {
@@ -1334,7 +1333,6 @@ void run_deltaN_loop(FILE* output_) {
     g_deltaN_phiref_potential = potential(phiref);
 
     DeltaNRKScratch rk_scratch;
-    rk_scratch.ensure_size(f.size());
 
     const auto report_step = [&](int step_index) {
         if (screen_updates && step_index % output_freq == 0) {
@@ -1605,7 +1603,6 @@ void run_post_inflation_loop(FILE* output_) {
     int numsteps = 0;
 
     InflationRKScratch rk_scratch;
-    rk_scratch.ensure_size(f.size());
 
     const auto report_step = [&](int step_index) {
         if (step_index % output_freq == 0) {
