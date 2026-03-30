@@ -85,14 +85,14 @@ make ENABLE_NATIVE=1 ENABLE_LTO=1
 
 ### Input Setup
 
-Two default potentials are supported:
+Two default examples are supported:
 
-1. **Numerical potential (default)**  
+1. **Example A (current repository default): Numerical potential**  
    Implements the ultra-slow-roll (USR) potential described as Case I in [arXiv:2410.23942](https://arxiv.org/abs/2410.23942), with $\mathcal{P}_{\zeta,\rm{tree}}^{\rm{max}} = 10^{-2}$.
 
    **Note:** This option is slower than the analytical one. For faster runs (e.g., on a laptop), prefer an analytical potential.
 
-2. **Analytical potential**  
+2. **Example B: Analytical hilltop potential**  
    The hilltop potential:
    
  $$V(\phi) = V_0 \left(1 - \frac{1-n_s}{2}\frac{\phi^2}{2 M_{\rm Pl}^2}\right).$$  
@@ -100,8 +100,8 @@ Two default potentials are supported:
 Switch between these via the compile-time `numerical_potential` flag in `parameters.h` (requires recompilation).
 To keep run-time values consistent with the selected potential mode, use the matching preset:
 
-- Numerical (default): `params.numerical.txt`
-- Analytical hilltop: `params.analytic.txt`
+- Example A (Numerical): `params.numerical.txt`
+- Example B (Analytical hilltop): `params.analytic.txt`
 
 ### Configuration Model
 
@@ -111,14 +111,15 @@ InflationEasy now supports two classes of parameters:
 - Run-time parameters (`params.txt`): physical values, time steps, output options, and most scan parameters.
 
 A ready-to-use `params.txt` is included at the repository root.
+In the current repository state, `params.txt` matches **Example A (Numerical)**.
 You can edit it directly; values there override the defaults compiled into the executable.
 Two preset profiles are also included for convenience:
 
 ```bash
-# Numerical profile (default)
+# Switch active profile to Example A (Numerical)
 cp params.numerical.txt params.txt
 
-# Analytic profile
+# Switch active profile to Example B (Analytical hilltop)
 cp params.analytic.txt params.txt
 ```
 
@@ -151,7 +152,7 @@ After compilation, run the simulation via:
 ./inflation_easy
 ```
 
-Output will appear in the `results/` directory. A runtime log is saved in `output.txt`, along with energy densities, field values, spectra, and more.
+Output will appear in the `results/` directory. A runtime log is saved in `results/output.txt`, along with energy densities, field values, spectra, and more.
 
 All quantities are given in **reduced Planck units**, where $M_{\mathrm{Pl}}^{\text{red}} = \frac{M_{\mathrm{Pl}}}{\sqrt{8\pi}} = 1$. This sets $\hbar = c = 1$ and $8\pi G = 1$, simplifying the equations.
 

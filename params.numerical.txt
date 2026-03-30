@@ -1,4 +1,4 @@
-# Numerical-potential preset (default)
+# Example A profile preset: numerical potential
 # Use with: numerical_potential = 1 in src/parameters.h
 # Compile-time settings such as N, numerical_potential, and the deltaN
 # monotonic/antimonotonic potential flags are set in src/parameters.h
