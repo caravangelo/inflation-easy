@@ -6,17 +6,80 @@
 
 #include "main.h"
 
+#if numerical_potential
+namespace {
+int find_bracketing_index(double field_value, int start_index) {
+    const int n = static_cast<int>(field_numerical.size());
+    if (n < 2) {
+        std::fprintf(stderr, "Numerical potential table must contain at least two points.\n");
+        std::exit(1);
+    }
+
+    // Current implementation assumes field_numerical is sorted in descending order.
+    if (field_value > field_numerical.front() || field_value < field_numerical.back()) {
+        std::fprintf(
+            stderr,
+            "Field value %.17g is outside the numerical potential range [%.17g, %.17g].\n",
+            field_value,
+            field_numerical.back(),
+            field_numerical.front());
+        std::exit(1);
+    }
+
+    if (start_index <= 1) {
+        int lo = 0;
+        int hi = n - 1;
+        while (hi - lo > 1) {
+            const int mid = lo + (hi - lo) / 2;
+            if (field_numerical[mid] >= field_value) lo = mid;
+            else hi = mid;
+        }
+        return hi;
+    }
+
+    int l = std::clamp(start_index, 1, n - 1);
+    while (l < n && field_numerical[l] >= field_value) ++l;
+    while (l > 1 && field_numerical[l - 1] < field_value) --l;
+
+    if (l <= 0 || l >= n) {
+        std::fprintf(stderr, "Interpolation index out of bounds for field value %.17g.\n", field_value);
+        std::exit(1);
+    }
+
+    return l;
+}
+
+double interpolate_from_table(
+    double field_value,
+    int l,
+    const std::vector<double>& table_values)
+{
+    const double x0 = field_numerical[l - 1];
+    const double x1 = field_numerical[l];
+    const double y0 = table_values[l - 1];
+    const double y1 = table_values[l];
+
+    if (x0 == x1) {
+        std::fprintf(stderr, "Interpolation failed due to repeated field grid points.\n");
+        std::exit(1);
+    }
+
+    return y1 + (field_value - x1) * (y0 - y1) / (x0 - x1);
+}
+} // namespace
+#endif
+
 #if !numerical_potential
 // -------------------------------------------------------------
 // Analytic potential (default: quadratic V(ϕ) = 1/2 m²ϕ²)
 // -------------------------------------------------------------
 
-float analytic_potential(float field_value) {
-    return V0 * (1. - (1. - ns) / 4. * pw2(field_value)) / pw2(rescale_B);
+double analytic_potential(double field_value) {
+    return V0 * (1.0 - (1.0 - ns) / 4.0 * pw2(field_value)) / pw2(rescale_B);
 }
 
-float analytic_potential_derivative(float field_value) {
-    return -V0 * (1. - ns) / 2. * field_value / pw2(rescale_B);
+double analytic_potential_derivative(double field_value) {
+    return -V0 * (1.0 - ns) / 2.0 * field_value / pw2(rescale_B);
 }
 #endif
 
@@ -25,18 +88,10 @@ float analytic_potential_derivative(float field_value) {
 // -------------------------------------------------------------
 // Return the potential V(ϕ) at a given field value (interpolated or analytic)
 // -------------------------------------------------------------
-float potential(float field_value) {
+double potential(double field_value) {
 #if numerical_potential
-    int l = 0;
-    while (field_numerical[l] >= field_value)
-        l++;
-
-    return (
-        potential_numerical[l] +
-        (field_value - field_numerical[l]) *
-        (potential_numerical[l - 1] - potential_numerical[l]) /
-        (field_numerical[l - 1] - field_numerical[l])
-    ) / pw2(rescale_B);
+    const int l = find_bracketing_index(field_value, 1);
+    return interpolate_from_table(field_value, l, potential_numerical) / pw2(rescale_B);
 #else
     return analytic_potential(field_value);
 #endif
@@ -45,50 +100,65 @@ float potential(float field_value) {
 // -------------------------------------------------------------
 // Return ∂V/∂ϕ at a grid point (interpolated or analytic)
 // -------------------------------------------------------------
-float potential_derivative(int i, int j, int k) {
+double potential_derivative(int i, int j, int k) {
 #if numerical_potential
-    int l = lstart[idx(i,j,k)];
-    while (field_numerical[l] >= f[idx(i,j,k)])
-        l++;
-
-    return (
-        potential_derivative_numerical[l] +
-        (f[idx(i,j,k)] - field_numerical[l]) *
-        (potential_derivative_numerical[l - 1] - potential_derivative_numerical[l]) /
-        (field_numerical[l - 1] - field_numerical[l])
-    ) / pw2(rescale_B);
+    const size_t id = idx(i, j, k);
+    const int l = find_bracketing_index(f[id], lstart[id]);
+    lstart[id] = std::max(1, l - int_err);
+    return interpolate_from_table(f[id], l, potential_derivative_numerical) / pw2(rescale_B);
 #else
     return analytic_potential_derivative(f[idx(i,j,k)]);
+#endif
+}
+
+double potential_derivative_from_value(double field_value) {
+#if numerical_potential
+    const int l = find_bracketing_index(field_value, 1);
+    return interpolate_from_table(field_value, l, potential_derivative_numerical) / pw2(rescale_B);
+#else
+    return analytic_potential_derivative(field_value);
+#endif
+}
+
+void evaluate_potential_from_value(
+    double field_value,
+    int hint,
+    int lookback,
+    int* next_hint,
+    double& pot,
+    double& pot_deriv)
+{
+#if numerical_potential
+    const int l = find_bracketing_index(field_value, hint);
+    pot = interpolate_from_table(field_value, l, potential_numerical) / pw2(rescale_B);
+    pot_deriv = interpolate_from_table(field_value, l, potential_derivative_numerical) / pw2(rescale_B);
+    if (next_hint) {
+        const int back = std::max(1, lookback);
+        *next_hint = std::max(1, l - back);
+    }
+#else
+    (void)hint;
+    (void)lookback;
+    pot = analytic_potential(field_value);
+    pot_deriv = analytic_potential_derivative(field_value);
+    if (next_hint) *next_hint = 1;
 #endif
 }
 
 // -------------------------------------------------------------
 // Compute the total potential energy on the grid
 // -------------------------------------------------------------
-float potential_energy() {
+double potential_energy() {
     DECLARE_INDICES
-    float pot = 0.0;
+    double pot = 0.0;
 
 #if numerical_potential
     int l;
     LOOP {
-        l = lstart[idx(i,j,k)];
-        while (field_numerical[l] >= f[idx(i,j,k)])
-            l++;
-
-        if (field_numerical[l - 1] < f[idx(i,j,k)]) {
-            printf("Interpolation Error\n");
-            exit(1);
-        }
-
-        pot += (
-            potential_numerical[l] +
-            (f[idx(i,j,k)] - field_numerical[l]) *
-            (potential_numerical[l - 1] - potential_numerical[l]) /
-            (field_numerical[l - 1] - field_numerical[l])
-        ) / pw2(rescale_B);
-
-        lstart[idx(i,j,k)] = l - int_err;
+        const size_t id = idx(i, j, k);
+        l = find_bracketing_index(f[id], lstart[id]);
+        pot += interpolate_from_table(f[id], l, potential_numerical) / pw2(rescale_B);
+        lstart[id] = std::max(1, l - int_err);
     }
 #else
     LOOP {
@@ -96,7 +166,7 @@ float potential_energy() {
     }
 #endif
 
-    pot /= gridsize;
+    pot /= static_cast<double>(gridsize);
     return pot;
 }
 
@@ -104,36 +174,31 @@ float potential_energy() {
 // Compute ∂V/∂ϕ divided by V at a grid point
 // Used in δN evolution
 // -------------------------------------------------------------
-float pot_ratio(int i, int j, int k) {
+double pot_ratio(int i, int j, int k) {
 #if numerical_potential
-    int l = lstart[idx(i,j,k)];
-    while (field_numerical[l] >= f[idx(i,j,k)])
-        l++;
+    const size_t id = idx(i, j, k);
+    const int l = find_bracketing_index(f[id], lstart[id]);
 
-    if (field_numerical[l - 1] < f[idx(i,j,k)]) {
-        printf("Interpolation Error\n");
-        exit(1);
-    }
+    double pot = interpolate_from_table(f[id], l, potential_numerical);
+    double pot_deriv = interpolate_from_table(f[id], l, potential_derivative_numerical);
 
-    float pot = (
-        potential_numerical[l] +
-        (f[idx(i,j,k)] - field_numerical[l]) *
-        (potential_numerical[l - 1] - potential_numerical[l]) /
-        (field_numerical[l - 1] - field_numerical[l])
-    );
-
-    float pot_deriv = (
-        potential_derivative_numerical[l] +
-        (f[idx(i,j,k)] - field_numerical[l]) *
-        (potential_derivative_numerical[l - 1] - potential_derivative_numerical[l]) /
-        (field_numerical[l - 1] - field_numerical[l])
-    );
-
-    lstart[idx(i,j,k)] = l - int_errN;
+    lstart[id] = std::max(1, l - int_errN);
 #else
-    float pot = potential(f[idx(i,j,k)]);
-    float pot_deriv = potential_derivative(i, j, k);
+    double pot = potential(f[idx(i,j,k)]);
+    double pot_deriv = potential_derivative(i, j, k);
 #endif
 
+    return pot_deriv / pot;
+}
+
+double pot_ratio_from_value(double field_value) {
+#if numerical_potential
+    const int l = find_bracketing_index(field_value, 1);
+    const double pot = interpolate_from_table(field_value, l, potential_numerical);
+    const double pot_deriv = interpolate_from_table(field_value, l, potential_derivative_numerical);
+#else
+    const double pot = potential(field_value);
+    const double pot_deriv = potential_derivative_from_value(field_value);
+#endif
     return pot_deriv / pot;
 }

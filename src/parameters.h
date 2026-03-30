@@ -1,117 +1,191 @@
-// -------------------- InflationEasy Configuration Flags --------------------
+// parameters.h - Simulation configuration interface (hybrid model)
+//
+// This header documents two classes of parameters:
+//
+// 1) Compile-time parameters (edited here, then recompiled):
+//    - feature toggles and lattice layout
+//    - preprocessor-controlled branches
+//
+// 2) Run-time parameters (edited in params.txt, no recompilation):
+//    - physical model values
+//    - integration/output controls
+//    - deltaN and post-inflation settings
+//
+// Defaults for run-time parameters are defined in runtime_parameters.cpp.
+// If params.txt is present, those values override the defaults at startup.
 
-// Set to 1 to enable a numerical potential loaded from file, 0 for analytic expression
+#pragma once
+
+// -------------------- Compile-time feature toggles --------------------
+
+// Set to 1 to enable a numerical potential loaded from file, 0 for analytic expression.
 #define numerical_potential 1
 
-// Set to 1 to perform deltaN evolution to calculate zeta
+// 1: evolve the auxiliary deltaN system to compute zeta.
 #define perform_deltaN 1
 
-/// Set to 1 to enable OpenMP parallelism in selected loops (if supported by the compiler)
+// 1: compute scalar-induced gravitational waves (SIGWs) during inflation.
+#define calculate_SIGW 1
+
+// 1: extend SIGW computation to a post-inflationary phase.
+#define post_inflation 1
+
+#if post_inflation && !calculate_SIGW
+#error "post_inflation requires calculate_SIGW = 1"
+#endif
+
+// 1: enable OpenMP parallelism in selected loops (requires compiler support).
 #define parallel_calculation 1
 
-// -------------------- Lattice and Evolution Parameters --------------------
+// -------------------- Compile-time lattice parameters --------------------
 
-// Number of points along each spatial dimension (total lattice points will be N^3)
-const int N = 128; // Must be a power of 2
+// Number of grid points per spatial dimension (total grid size N^3).
+// Must be a power of 2 for the FFT routines used in the code.
+const int N = 128;
 
-// Rescaling exponent (must be 0 unless you've tested otherwise)
-const float rescale_s = 0;
+// -------------------- Monotonicity hints (compile-time) --------------------
 
-// Final scale factor value (simulation stops when a >= af)
-const float af = 1000.;
-
-// Random seed for generating initial vacuum fluctuations
-const int seed = 8;
-
-// -------------------- Physical Model Parameters --------------------
-
+// These compile-time flags select which deltaN stopping-condition potential
+// criterion is compiled in (field rolling direction toward/away from the end surface).
+// They are NOT runtime params.txt keys.
+//
+// Default behavior keeps the historical auto-switch:
+//   - numerical_potential = 1 -> monotonic=1, anti-monotonic=0
+//   - numerical_potential = 0 -> monotonic=0, anti-monotonic=1
+//
+// For custom models, manually edit the two defines below if needed:
+//   - 1/0 -> monotonic potential criterion: evolve while |phi| > |phi_ref|
+//   - 0/1 -> anti-monotonic potential criterion: evolve while |phi| < |phi_ref|
+//   - 0/0 -> generic potential criterion: evolve while V(phi) > V(phi_ref)
 #if numerical_potential
-// Parameters used if the potential is loaded from file
-
-const float V0 = 3e-9; // Potential parameter
-const float rescale_B = sqrt(V0); // Rescaling factor (see doc)
-const float initial_field = 2.9181235049318586; // Initial field value
-const float initial_derivative = -0.06727651095116181; // Initial field velocity (in code units)
-const float L = 10.; // Comoving box size in code units (must be sub-horizon at start)
-const float dt = 0.001; // Time step
-// Output frequency in time steps (standard and infrequent quantities)
-const int output_freq = 100;
-const int output_infrequent_freq = 100;
-
-#if perform_deltaN
-const float dN = 0.0001; // e-fold increment in deltaN evolution
-const float Nend = 2.;   // Final e-folding time for deltaN run
-// const float phiref_manual = value; // (Optional) manually set the reference ϕ value
-
-// Set monotonic_potential = 1 if the potential increases with |ϕ|
-// Set antimonotonic_potential = 1 if it decreases with |ϕ|
-// Leave both set to 0 for general potentials, in which case deltaN evolution is slower. 
 #define monotonic_potential 1
 #define antimonotonic_potential 0
-
-#endif
-
 #else
-// Parameters used for an analytic potential (defaults are for quadratic potential)
-
-const float V0 = 3.338e-13; // Potential parameter
-const float ns = 0.97; // Spectral index
-const float rescale_B = sqrt(V0); // Rescaling factor (see doc)
-const float initial_field = 0.0935; // Initial field value
-const float initial_derivative = 0.000796; // Initial field velocity (in code units)
-const float L = 10.; // Comoving box size in code units (must be sub-horizon at start)
-const float dt = 0.0005; // Time step
-// Output frequency in time steps (standard and infrequent quantities)
-const int output_freq = 200;
-const int output_infrequent_freq = 200;
-
-#if perform_deltaN
-const float dN = 0.0000001; // e-fold increment in deltaN evolution
-const float Nend = 0.001; // Final e-folding time for deltaN run
-// const float phiref_manual = value; // (Optional) manually set the reference ϕ value
-
-// Set monotonic_potential = 1 if the potential increases with |ϕ|
-// Set antimonotonic_potential = 1 if it decreases with |ϕ|
-// Leave both set to 0 for general potentials, in which case deltaN evolution is slower.
 #define monotonic_potential 0
 #define antimonotonic_potential 1
-
-#endif
 #endif
 
-// -------------------- Momentum Cutoff Options --------------------
+#if monotonic_potential && antimonotonic_potential
+#error "Set at most one of monotonic_potential / antimonotonic_potential to 1."
+#endif
 
-// Set high_cutoff_index > 0 to cutoff modes with k > (2 pi/L)*high_index and k < (2 pi/L)*low_index
-const float high_cutoff_index = 0;
-const float low_cutoff_index = 0;
+// -------------------- Run-time parameters --------------------
+// Defaults are defined in runtime_parameters.cpp and can be overridden by params.txt.
+// Keep these as extern declarations only; do not assign values here.
 
-// Set to 1 to enforce the cutoff continuously, not just at initialization
-const int forcing_cutoff = 0;
+// Random seed used to initialize vacuum fluctuations.
+extern int seed;
 
-// -------------------- Output Configuration --------------------
+// Field-rescaling exponent used by internal conventions.
+// Keep at 0 unless a different scaling has been validated.
+extern double rescale_s;
 
-// Toggle various outputs (1 = enabled)
-const int output_spectra = 1;
-const int output_histogram = 1;
-const int output_energy = 1;
-const int output_box3D = 0;
-const int output_box2D = 1;
-const int output_bispectrum = 0;
+// Final scale factor for the main inflationary run (optional in params.txt; defaults to 2*N).
+extern double af;
+
+// Potential normalization.
+extern double V0;
+
+// Rescaling factor B (if not explicitly set in params.txt, defaults to sqrt(V0)).
+extern double rescale_B;
+
+#if !numerical_potential
+// Spectral index parameter used by the default analytic hilltop branch.
+extern double ns;
+#endif
+
+// Homogeneous initial field value and time derivative (code units).
+extern double initial_field;
+extern double initial_derivative;
+
+// Comoving box size and main time step (code units).
+extern double L;
+extern double dt;
+
+// Main inflation integrator selection.
+// 0: leapfrog (default, staggered field derivatives)
+// 1: RK4 (fixed-step)
+// 2: RK45 (adaptive-step Dormand-Prince)
+enum IntegratorType {
+    INTEGRATOR_LEAPFROG = 0,
+    INTEGRATOR_RK4 = 1,
+    INTEGRATOR_RK45 = 2
+};
+extern int integrator;
+#if post_inflation
+// Post-inflation integrator selection (same enum values as `integrator`).
+extern int post_inflation_integrator;
+#endif
+#if perform_deltaN
+// deltaN-loop integrator selection (same enum values as `integrator`).
+extern int deltaN_integrator;
+#endif
+
+// RK45 controls (used when either integrator selection is INTEGRATOR_RK45).
+// If rk45_min_dt <= 0, runtime uses 1e-6 * dt.
+// If rk45_max_dt <= 0, runtime uses dt.
+extern double rk45_abs_tol;
+extern double rk45_rel_tol;
+extern double rk45_min_dt;
+extern double rk45_max_dt;
+extern double rk45_safety;
+
+// Output cadences in number of integration steps.
+extern int output_freq;
+extern int output_infrequent_freq;
 
 #if perform_deltaN
-const int output_LOG = 0;     // Calculates zeta with the log relation (see documentation)
-const float eta_log = -0.5;   // Value of constant eta assumed in the log formula
+// deltaN integration controls.
+extern double dN;
+extern double Nend;
+
+// Manual reference-field option for deltaN stopping hypersurface.
+// If use_phiref_manual != 0, phiref_manual_value is used.
+extern int use_phiref_manual;
+extern double phiref_manual_value;
 #endif
 
-// Print time/step info to console
-const int screen_updates = 1;
+#if post_inflation
+// Post-inflation controls (used only if post_inflation==1).
+extern double horizon_factor;
+extern double omega;
+extern double dt_post_inflation;
+// Optional in params.txt; defaults to 2*N if not provided.
+extern double af_post_inflation;
+#endif
 
-// Number of bins used in field histograms
-const int nbins = 256;
+// Optional Fourier-space cutoff controls.
+extern double high_cutoff_index;
+extern double low_cutoff_index;
+extern int forcing_cutoff;
 
-// -------------------- Numerical Potential Handling --------------------
+// Output switches (1 = on, 0 = off).
+extern int output_spectra;
+extern int output_histogram;
+extern int output_energy;
+extern int output_box3D;
+extern int output_box2D;
+extern int output_bispectrum;
+
+#if perform_deltaN
+// LOG-based zeta approximation controls.
+extern int output_LOG;
+extern double eta_log;
+#endif
+
+// Screen progress output and histogram resolution.
+extern int screen_updates;
+extern int nbins;
 
 #if numerical_potential
-const int int_err = 5;   // Increase if the code gives "interpolation error"
-const int int_errN = 1;  // Same, but for deltaN interpolation
+// Interpolation look-back controls for tabulated numerical potential.
+extern int int_err;
+extern int int_errN;
 #endif
+
+// Derived run-time quantity: comoving lattice spacing dx = L/N.
+extern double dx;
+
+// Load run-time overrides from a key=value text file.
+// Unknown keys are ignored with a warning. Missing file is allowed.
+void load_runtime_parameters(const char* filename = "params.txt");
