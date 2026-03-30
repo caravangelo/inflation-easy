@@ -211,6 +211,12 @@ void load_runtime_parameters(const char* filename) {
     bool af_post_overridden = false;
     bool rk45_min_overridden = false;
     bool rk45_max_overridden = false;
+#if !perform_deltaN
+    bool ignored_deltaN_runtime_keys = false;
+#endif
+#if !post_inflation
+    bool ignored_post_inflation_runtime_keys = false;
+#endif
 
     std::string line;
     int lineno = 0;
@@ -311,6 +317,19 @@ void load_runtime_parameters(const char* filename) {
         else if (key == "int_err" && parse_int(val, ival)) int_err = std::max(1, ival);
         else if (key == "int_errN" && parse_int(val, ival)) int_errN = std::max(1, ival);
 #endif
+#if !perform_deltaN
+        else if (key == "dN" || key == "Nend" || key == "use_phiref_manual"
+              || key == "phiref_manual_value" || key == "output_LOG"
+              || key == "eta_log" || key == "deltaN_integrator") {
+            ignored_deltaN_runtime_keys = true;
+        }
+#endif
+#if !post_inflation
+        else if (key == "horizon_factor" || key == "omega" || key == "dt_post_inflation"
+              || key == "af_post_inflation" || key == "post_inflation_integrator") {
+            ignored_post_inflation_runtime_keys = true;
+        }
+#endif
         else if (key == "N" || key == "numerical_potential" || key == "perform_deltaN"
               || key == "calculate_SIGW" || key == "post_inflation" || key == "parallel_calculation"
               || key == "monotonic_potential" || key == "antimonotonic_potential") {
@@ -333,6 +352,16 @@ void load_runtime_parameters(const char* filename) {
     if (!rk45_max_overridden || rk45_max_dt <= 0.0) rk45_max_dt = std::abs(dt);
     sanitize_rk45_controls();
     sanitize_all_integrator_choices();
+#if !perform_deltaN
+    if (ignored_deltaN_runtime_keys) {
+        std::fprintf(stderr, "Ignoring deltaN runtime parameters in %s because perform_deltaN=0.\n", filename);
+    }
+#endif
+#if !post_inflation
+    if (ignored_post_inflation_runtime_keys) {
+        std::fprintf(stderr, "Ignoring post-inflation runtime parameters in %s because post_inflation=0.\n", filename);
+    }
+#endif
 }
 
 const char* integrator_name() {

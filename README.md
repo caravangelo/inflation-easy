@@ -12,8 +12,20 @@ More information is available in the associated publication: [arXiv:2506.11797](
 - **Lattice-Based Simulation:** Evolves a scalar field on a discrete lattice in an expanding universe.
 - **Flexible Potential Handling:** Supports both analytical and numerical representations of the inflationary potential.  
   **Note:** The code typically runs faster when using an analytical potential.
+- **Gravitational-Waves:** Can compute the scalar-induced gravitational-wave background sourced during inflation and after inflation at horizon re-entry.
 - **OpenMP Parallelization:** Optionally leverages OpenMP for accelerated computation on multi-core systems.
 - **Comprehensive Output:** Produces detailed outputs including field statistics, background quantities, and power spectra.
+
+## Quickstart Notebook (Recommended For Non-Coders)
+
+Use `notebooks/quickstart.ipynb` for a guided, self-running workflow that:
+
+- sets up a small analytical run (default `N=64`, editable in the notebook),
+- compiles and runs the code,
+- stores outputs in `pedagogical_runs/...`,
+- and produces key summary plots.
+
+This is the recommended first entry point for new users.
 
 ## Code Structure
 
@@ -40,7 +52,8 @@ Each file should contain a single column of values, one per line. Analytical pot
 - Simulation results, logs, spectra, and other diagnostics are written here.
 
 ### Notebook (`notebooks/`)
-- `plot.ipynb`: A Jupyter notebook for post-processing and visualizing simulation outputs.
+- `quickstart.ipynb`: Guided end-to-end run notebook (recommended first notebook).
+- `plot.ipynb`: Post-processing and visualization notebook for simulation outputs.
 
 ## Prerequisites
 
@@ -188,7 +201,10 @@ This checks representative outputs for all requested integrators and reports mis
 
 ## Jupyter Notebook
 
-An example notebook, `plot.ipynb`, is included to help visualize output data.
+Two notebooks are included:
+
+- `quickstart.ipynb`: recommended first notebook for a guided run + summary plots.
+- `plot.ipynb`: dedicated post-processing notebook for detailed visualization of outputs.
 
 To use it:
 
@@ -196,10 +212,14 @@ To use it:
 2. Run:
 
 ```bash
-jupyter notebook plot.ipynb
+jupyter notebook notebooks/quickstart.ipynb
 ```
 
-The notebook reads data from `results/` and plots quantities like the field evolution and power spectra.
+For post-processing existing outputs, you can also run:
+
+```bash
+jupyter notebook notebooks/plot.ipynb
+```
 
 ## Citing This Work
 
