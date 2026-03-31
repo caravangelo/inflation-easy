@@ -24,8 +24,5 @@ results/
 pedagogical_runs/
 .pedagogical_backup/
 
-# Local/private experiment tree kept out of public release
-Nbody/
-
 # Keep manuscript artifacts out of the code repository
 latex/
