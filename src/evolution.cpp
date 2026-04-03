@@ -1461,7 +1461,7 @@ void evolve_derivs_post_inflation(double d) {
     const double invH   = 1.0 / Htilde;
     const double coeffU = 4.0 / (3.0 * (1.0 + omega));
 
-    // RHS amplitude (C=2 convention)
+    // Source prefactor in the tensor equation normalization used by this code.
     const double srcAmp = 2.0 * std::pow(a, -2.0 * rescale_s);
 
 #if parallel_calculation
