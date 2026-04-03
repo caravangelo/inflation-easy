@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+title: InflationEasy
+message: "If you use this software, please cite it using the metadata below."
+type: software
+authors:
+  - family-names: Caravano
+    given-names: Angelo
+repository-code: "https://github.com/caravangelo/inflation-easy"
+url: "https://github.com/caravangelo/inflation-easy"
+license: MIT
+preferred-citation:
+  type: article
+  authors:
+    - family-names: Caravano
+      given-names: Angelo
+  title: "InflationEasy: A C++ Lattice Code for Inflation"
+  journal: arXiv
+  year: 2025
+  article-number: "2506.11797"
+  url: "https://arxiv.org/abs/2506.11797"

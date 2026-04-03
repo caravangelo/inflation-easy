@@ -1,125 +1,205 @@
-// main.h - Global declarations and shared definitions for InflationEasy
+// main.h - Global declarations and shared interfaces
 //
-// This header declares global variables, constants, and functions
-// used across the simulation. Global variable definitions are in main.cpp.
+// This header declares global variables, lattice fields, helper routines,
+// and function interfaces that are shared across the simulation modules.
 
 #pragma once
 
-#include <time.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <math.h>
-#include <string.h>
-#include <float.h>
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
 #include <fstream>
+#include <stdexcept>
+#include <utility>
 #include <vector>
-#include "parameters.h" // Adjustable simulation parameters
+#include "parameters.h" // Simulation configuration parameters
 
-// -------------------- Math and Constants --------------------
+// -------------------- Mathematical helpers --------------------
 
-#define float double // Work with double precision
+//#define float double // Uncomment to force double precision for float-based arrays
 
-const float pi = (float)(2. * asin(1.));
+// Numerical value of pi.
+const double pi = 2.0 * std::asin(1.0);
 
-inline float pw2(float x) { return x * x; } // Square of a float
+// Convenience helper returning x^2.
+inline double pw2(double x) { return x * x; }
 
-// ----------------- Function to access vector elements -----------------
+// -------------------- Indexing helpers --------------------
 
+// Map 3D lattice indices (i,j,k) to a flat index for arrays of size N^3.
 inline size_t idx(int i, int j, int k) {
-    return static_cast<size_t>(i) * N * N + static_cast<size_t>(j) * N + static_cast<size_t>(k);
+    return static_cast<size_t>(i) * N * N
+        + static_cast<size_t>(j) * N
+        + static_cast<size_t>(k);
 }
 
-// -------------------- Simulation Parameters --------------------
+// Map a symmetric tensor index (i,j) with i,j in {0,1,2}
+// to a packed component index in {0,...,5}.
+inline int sym_idx(int i, int j) {
+    if (i > j) std::swap(i, j);
+    if (i == 0 && j == 0) return 0;
+    if (i == 1 && j == 1) return 1;
+    if (i == 2 && j == 2) return 2;
+    if (i == 0 && j == 1) return 3;
+    if (i == 0 && j == 2) return 4;
+    if (i == 1 && j == 2) return 5;
+    throw std::out_of_range("Invalid tensor indices");
+}
 
-// Grid spacing (comoving distance between points)
-const float dx = L / (float)N;
+// Inverse mapping of sym_idx: return tensor indices (l,m)
+// associated with packed component comp = 0..5.
+inline std::pair<int,int> comp_to_indices(int comp) {
+    switch (comp) {
+        case 0: return {0,0};
+        case 1: return {1,1};
+        case 2: return {2,2};
+        case 3: return {0,1};
+        case 4: return {0,2};
+        case 5: return {1,2};
+        default: throw std::out_of_range("Invalid component index");
+    }
+}
 
-// Total number of points in the 3D grid
+// -------------------- Derived lattice quantities --------------------
+
+// Comoving lattice spacing (run-time, derived from L and N).
+extern double dx;
+
+// Total number of lattice sites.
 const int gridsize = N * N * N;
 
-// -------------------- Global Dynamic Variables --------------------
+// -------------------- Global runtime state --------------------
 
-// Time and scale factor evolution
-extern float t, t0;             // Time and initial time
-extern float astep, a;          // Scale factor and backup (for leapfrog)
-extern float ad, ad2;           // First and second derivatives of scale factor
-extern float aterm;             // Intermediate quantity used in evolution
-extern float Ne;                // e-folding number used in deltaN evolution
-extern float hubble_init;       // Initial Hubble parameter
+// Time and background evolution variables.
+extern double t, t0;
+extern double astep, a;
+extern double ad, ad2;
+extern double aterm;
+extern double Ne;
+extern double hubble_init;
 
-// Reference field value for deltaN termination
-extern float phiref;
+// Reference field value used in deltaN evolution.
+extern double phiref;
 
-// I/O formatting
-extern char ext_[500];          // Filename extension for outputs
-extern char mode_[];            // File open mode (write/append)
+// Output naming and file handling.
+extern char ext_[500];
+extern char mode_[];
 
-// -------------------- Lattice Fields --------------------
+// -------------------- Lattice fields --------------------
 
-// Main field and its time derivative
-extern std::vector<float> f;
-extern std::vector<float> fd;
+// Scalar field and its time derivative.
+extern std::vector<double> f;
+extern std::vector<double> fd;
 
 #if perform_deltaN
-// deltaN field for separate evolution
-extern std::vector<float> deltaN;
+// Auxiliary field used for deltaN evolution.
+extern std::vector<double> deltaN;
 #endif
 
-// Nyquist frequency components for FFT
-extern float fnyquist_p[N][2 * N], fdnyquist_p[N][2 * N];
+#if calculate_SIGW
+// Tensor perturbations and their time derivatives
+// stored as the six independent components of a symmetric tensor.
+extern std::vector<float> hij[6];
+extern std::vector<float> hijd[6];
+#endif
+
+// Nyquist-frequency plane data required by the FFT layout.
+extern double fnyquist_p[N][2 * N], fdnyquist_p[N][2 * N];
+#if calculate_SIGW
+extern float hijnyquist_p[6][N][2 * N], hijdnyquist_p[6][N][2 * N];
+#endif
 
 #if numerical_potential
-// Interpolation for numerical potential
-extern std::vector<int> lstart;                     // Interpolation index grid
-extern std::vector<float> field_numerical;          // Grid of ϕ values
-extern std::vector<float> potential_numerical;      // V(ϕ) values
-extern std::vector<float> potential_derivative_numerical; // dV/dϕ values
+// Tables and bookkeeping used to interpolate a numerical potential.
+extern std::vector<int>    lstart;
+extern std::vector<double> field_numerical;
+extern std::vector<double> potential_numerical;
+extern std::vector<double> potential_derivative_numerical;
 #endif
 
-// -------------------- Grid Macros --------------------
-                             
-#define LOOP for(i=0;i<N;i++) for(j=0;j<N;j++) for(k=0;k<N;k++) // Loop over full grid
-#define INDEXLIST int i, int j, int k                   // Function parameter list for indexing
-#define DECLARE_INDICES int i, j, k;                    // Local index variable declarations
+// -------------------- Grid convenience macros --------------------
 
-// -------------------- Function Declarations --------------------
+// Loop over all lattice sites.
+#define LOOP for (i = 0; i < N; ++i) for (j = 0; j < N; ++j) for (k = 0; k < N; ++k)
 
-// Initialization
-void initialize();               // Basic parameter checks and hubble_init
-void initializef();              // Generate vacuum fluctuations
-void initializeN();              // Setup for deltaN calculation
-void initialize_simulation();    // Full initialization pipeline
+// Standard argument list for functions operating on lattice indices.
+#define INDEXLIST int i, int j, int k
 
-// Field evolution
-void evolve_fields(float d);     // Evolve f with step d
-void evolve_derivs(float d);     // Evolve fd with step d
-void evolve_scale(float d);      // (Unused but present)
-void evolve_fieldsN(float d);    // Evolve f during deltaN run
-void evolve_derivsN(float d);    // Evolve fd during deltaN run
+// Local declaration of lattice indices.
+#define DECLARE_INDICES int i, j, k;
 
-// Energies
-float gradient_energy();         // Compute spatial gradient energy
-float kin_energy();              // Compute kinetic energy
-float potential_energy();        // Compute total potential energy on grid
+// -------------------- Function declarations --------------------
 
-// Potential interface
-float potential(float field_value);                 // V(ϕ) for single value
-float potential_derivative(int i, int j, int k);    // ∂V/∂ϕ at a grid point
-float pot_ratio(int i, int j, int k);               // ∂V/∂ϕ / V
+// Initialization routines.
+void initialize();
+void initializef();
+#if calculate_SIGW
+void initializeGW();
+#endif
+void initialize_simulation();
+void initializeN();
+void initialize_post_inflation();
 
-// Output routines
-void output_parameters();       // Write simulation parameters to file
-void save(int force);           // Save observables (means, spectra, etc.)
-void save_last();               // Final snapshot
-void saveN();                   // Save for deltaN evolution
+// Field evolution routines.
+void evolve_fields(double d);
+void evolve_derivs(double d);
+void evolve_scale(double d);
+void evolve_fieldsN(double d);
+void evolve_derivsN(double d);
 
-// Utilities
-void fftrn(float f[], float fnyquist[], int ndims, int size[], int forward); // Real FFT
-void load_vector(const std::string& filename, std::vector<float>& vec);      // Read floats from file
-bool ensure_results_directory();                                             // Create output directory if needed
+// Energy diagnostics.
+double gradient_energy();
+double kin_energy();
+double potential_energy();
 
-// Main evolution loops
+// Potential interface.
+double potential(double field_value);
+double potential_derivative(int i, int j, int k);
+double potential_derivative_from_value(double field_value);
+void evaluate_potential_from_value(double field_value, int hint, int lookback, int* next_hint, double& pot, double& pot_deriv);
+double pot_ratio(int i, int j, int k);
+double pot_ratio_from_value(double field_value);
+
+// Output routines.
+void output_parameters();
+void save(int force);
+void save_last();
+void saveN();
+void save_post_inflation(int force);
+
+// Utility helpers.
+void load_vector(const std::string& filename, std::vector<double>& vec);
+bool ensure_results_directory();
+const char* integrator_name();
+#if post_inflation
+const char* post_inflation_integrator_name();
+#endif
+#if perform_deltaN
+const char* deltaN_integrator_name();
+#endif
+inline bool inflation_uses_staggered_derivatives() {
+    return integrator == INTEGRATOR_LEAPFROG;
+}
+#if perform_deltaN
+inline bool deltaN_uses_staggered_derivatives() {
+    return deltaN_integrator == INTEGRATOR_LEAPFROG;
+}
+#endif
+#if post_inflation
+inline bool post_inflation_uses_staggered_derivatives() {
+    return post_inflation_integrator == INTEGRATOR_LEAPFROG;
+}
+#endif
+
+// Main evolution drivers.
 void run_evolution_loop(FILE* output_);
 #if perform_deltaN
 void run_deltaN_loop(FILE* output_);
+#endif
+#if post_inflation
+void run_post_inflation_loop(FILE* output_);
 #endif

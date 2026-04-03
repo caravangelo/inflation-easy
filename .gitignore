@@ -15,3 +15,14 @@ notebooks/.jupyter/
 *.log
 *.aux
 *.tmp
+
+# Optional local runtime override file
+params.local.txt
+
+# Local run outputs and scratch work
+results/
+pedagogical_runs/
+.pedagogical_backup/
+
+# Keep manuscript artifacts out of the code repository
+latex/
