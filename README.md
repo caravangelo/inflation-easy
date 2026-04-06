@@ -227,6 +227,8 @@ jupyter notebook notebooks/plot.ipynb
 If you use *InflationEasy* in your research, please cite the associated code paper:  
 [arXiv:2506.11797](https://arxiv.org/abs/2506.11797)
 
+ASCL entry: [ascl:2603.004](https://ascl.net/2603.004)
+
 A machine-readable citation file is provided in `CITATION.cff`.
 
 Please cite also these additional references where *InflationEasy* was developed and applied:
