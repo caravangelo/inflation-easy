@@ -282,7 +282,8 @@ void initialize_post_inflation() {
 
 #endif
 
-    fd.resize(N * N * N, 0.0);
+    // The perfect-fluid evolution starts from a constant Newtonian potential.
+    fd.assign(gs, 0.0);
 
     a = 1.0;
     ad = horizon_factor * N * 2.0 * pi / L;
