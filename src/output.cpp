@@ -236,16 +236,21 @@ void meansvars(int flush)
     {
         av  += f[idx(i,j,k)];
         vel += fd[idx(i,j,k)];
-        var += pw2(f[idx(i,j,k)]);
     }
-    av  = av  / static_cast<double>(gridsize); // Convert sum to average
-    vel = vel / static_cast<double>(gridsize);
+    const double inv_gridsize = 1.0 / static_cast<double>(gridsize);
+    av  *= inv_gridsize;
+    vel *= inv_gridsize;
+
+    // Evaluate <(phi - <phi>)^2> directly to avoid cancellation when the
+    // homogeneous field is much larger than its fluctuations.
+    LOOP var += pw2(f[idx(i,j,k)] - av);
+    var *= inv_gridsize;
 
     vel = vel * std::pow(a, rescale_s - 1.0) * rescale_B;
 
     fprintf(means_,    " %e", av);
     fprintf(velocity_, " %e", vel);
-    fprintf(vars_,     " %e", var - pw2(av));
+    fprintf(vars_,     " %e", var);
 
     // Check for instability. See if the field has grown exponentially and become non-numerical at any point.
     if (av + DBL_MAX == av || (av != 0. && av / av != 1.))
@@ -1607,16 +1612,20 @@ void meansvars_post_inflation(int flush)
     {
         av += f[idx(i,j,k)];
         vel += fd[idx(i,j,k)];
-        var += pw2(f[idx(i,j,k)]);
     }
-    av = av / (double)gridsize; // Convert sum to average
-    vel = vel / (double)gridsize;
+    const double inv_gridsize = 1.0 / static_cast<double>(gridsize);
+    av  *= inv_gridsize;
+    vel *= inv_gridsize;
+
+    // Use the centered form for an accurate variance when fluctuations are small.
+    LOOP var += pw2(f[idx(i,j,k)] - av);
+    var *= inv_gridsize;
 
     vel = vel * pow(a, rescale_s - 1) * rescale_B;
 
     fprintf(means_, " %e", av);
     fprintf(velocity_, " %e", vel);
-    fprintf(vars_, " %e", var - pw2(av));
+    fprintf(vars_, " %e", var);
     // Check for instability. See if the field has grown exponentially and become non-numerical at any point.
     if (av + FLT_MAX == av || (av != 0. && av / av != 1.))
     {
