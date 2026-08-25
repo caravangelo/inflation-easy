@@ -1,15 +1,48 @@
-name: Build
+name: Build and test
 
 on:
   push:
   pull_request:
 
 jobs:
-  linux-build:
+  linux-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Build
-        run: make
+        run: make -j2
+
+      - name: Spatial operators
+        run: make test-spatial
+
+      - name: Clean-tree smoke matrix
+        run: make test-smoke
+
+  linux-sanitizers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Address and undefined-behaviour sanitizers
+        run: make test-sanitizers
+
+  macos-build:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build
+        run: make -j2
+
+      - name: Spatial operators
+        run: make test-spatial
+
+      - name: Clean-tree smoke matrix
+        run: make test-smoke

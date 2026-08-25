@@ -19,6 +19,11 @@ ns = 0.97
 # rescale_B = 5.777542733278901e-07
 initial_field = 0.0935
 initial_derivative = 0.000796
+# Optional initial mass-squared contribution. With the default rescale_B=sqrt(V0),
+# the code-unit potential curvature is -(1-ns)/2.
+# initial_mass_squared = -0.015
+# Optional run-time switch for the leading linear scalar metric correction (0/1; default 0).
+linear_metric_perturbations = 0
 L = 10.0
 
 # Output controls
@@ -29,6 +34,7 @@ output_histogram = 1
 output_energy = 1
 output_box3D = 0
 output_box2D = 0
+# Equilateral scalar-field configuration only; expensive for large lattices
 output_bispectrum = 0
 screen_updates = 1
 nbins = 256
@@ -46,6 +52,8 @@ output_LOG = 0
 eta_log = -0.5
 
 # Post-inflation controls
+# Sets the initial Hubble scale relative to the lattice resolution; the default
+# places even the shortest resolved wavelengths well outside the Hubble horizon.
 horizon_factor = 1.0
 omega = 0.3333333333333333
 dt_post_inflation = 0.001
@@ -59,8 +67,8 @@ dt_post_inflation = 0.001
 # post_inflation_integrator = leapfrog
 
 # RK45 controls (used only when a loop uses rk45)
-# rk45_abs_tol = 1e-6
-# rk45_rel_tol = 1e-4
-# rk45_min_dt = 1e-9
-# rk45_max_dt = 1e-1
+# rk45_abs_tol = 1e-8
+# rk45_rel_tol = 1e-6
+# rk45_min_dt = 1e-9       # if omitted, defaults to 1e-6*abs(dt)
+# rk45_max_dt = 1e-3       # if omitted, defaults to abs(dt)
 # rk45_safety = 0.9

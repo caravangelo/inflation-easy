@@ -17,11 +17,13 @@ import sys
 import tarfile
 import tempfile
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 
 
 NUMERIC_FILES = [
+    "modes.dat",
     "sf.dat",
     "means.dat",
     "velocity.dat",
@@ -29,6 +31,8 @@ NUMERIC_FILES = [
     "energy.dat",
     "conservation.dat",
     "spectra.dat",
+    "spectraGW.dat",
+    "spectraGWdot.dat",
     "spectratimes.dat",
     "histogram.dat",
     "histogramtimes.dat",
@@ -41,12 +45,18 @@ NUMERIC_FILES = [
     "post_inflation/variance.dat",
     "post_inflation/spectra.dat",
     "post_inflation/spectratimes.dat",
+    "post_inflation/spectraGW.dat",
+    "post_inflation/spectraGWdot.dat",
     "post_inflation/histogram.dat",
     "post_inflation/histogramtimes.dat",
 ]
 
 
-def run(cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None = None) -> None:
+def run(
+    cmd: list[str],
+    cwd: Optional[Path] = None,
+    env: Optional[dict[str, str]] = None,
+) -> None:
     subprocess.run(cmd, cwd=cwd, env=env, check=True)
 
 
@@ -145,6 +155,9 @@ def compare_results(a: Path, b: Path, rtol: float, atol: float) -> list[str]:
         pa = a / "results" / rel
         pb = b / "results" / rel
         if not pa.exists() or not pb.exists():
+            failures.append(
+                f"{rel}: missing output (current={pa.exists()}, reference={pb.exists()})"
+            )
             continue
         da = load_numeric(pa)
         db = load_numeric(pb)
@@ -153,7 +166,10 @@ def compare_results(a: Path, b: Path, rtol: float, atol: float) -> list[str]:
             continue
         if da.size == 0 and db.size == 0:
             continue
-        if not np.allclose(da, db, rtol=rtol, atol=atol, equal_nan=True):
+        if not np.all(np.isfinite(da)) or not np.all(np.isfinite(db)):
+            failures.append(f"{rel}: non-finite values are not valid regression data")
+            continue
+        if not np.allclose(da, db, rtol=rtol, atol=atol, equal_nan=False):
             diff = np.abs(da - db)
             max_abs = float(np.nanmax(diff))
             denom = np.maximum(np.abs(db), atol)
@@ -182,6 +198,23 @@ def main() -> int:
 
     if not params_src.exists():
         print(f"Missing params template: {params_src}", file=sys.stderr)
+        return 2
+
+    head_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, text=True,
+        stdout=subprocess.PIPE,
+    ).stdout.strip()
+    reference_sha = subprocess.run(
+        ["git", "rev-parse", args.main_ref], cwd=repo, check=True, text=True,
+        stdout=subprocess.PIPE,
+    ).stdout.strip()
+    if head_sha == reference_sha:
+        print(
+            "HEAD and the requested reference resolve to the same commit; "
+            "this comparison would be vacuous. Run `make test-smoke` for a "
+            "strict current-tree regression instead.",
+            file=sys.stderr,
+        )
         return 2
 
     try:

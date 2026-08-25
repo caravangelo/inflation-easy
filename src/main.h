@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 #include "parameters.h" // Simulation configuration parameters
+#include "spatial_discretization.h"
 
 // -------------------- Mathematical helpers --------------------
 
@@ -32,9 +33,7 @@ inline double pw2(double x) { return x * x; }
 
 // Map 3D lattice indices (i,j,k) to a flat index for arrays of size N^3.
 inline size_t idx(int i, int j, int k) {
-    return static_cast<size_t>(i) * N * N
-        + static_cast<size_t>(j) * N
-        + static_cast<size_t>(k);
+    return spatial::index(i, j, k);
 }
 
 // Map a symmetric tensor index (i,j) with i,j in {0,1,2}
@@ -78,7 +77,6 @@ const int gridsize = N * N * N;
 extern double t, t0;
 extern double astep, a;
 extern double ad, ad2;
-extern double aterm;
 extern double Ne;
 extern double hubble_init;
 
@@ -101,8 +99,8 @@ extern std::vector<double> deltaN;
 #endif
 
 #if calculate_SIGW
-// Tensor perturbations and their time derivatives
-// stored as the six independent components of a symmetric tensor.
+// Tensor perturbations and their time derivatives, stored as the six
+// components of a symmetric tensor.
 extern std::vector<float> hij[6];
 extern std::vector<float> hijd[6];
 #endif
@@ -134,72 +132,108 @@ extern std::vector<double> potential_derivative_numerical;
 
 // -------------------- Function declarations --------------------
 
-// Initialization routines.
+// Initialization routines. These functions mutate the global simulation state.
+/// Validate the initial configuration and initialize background quantities.
 void initialize();
+/// Allocate and initialize the scalar lattice in Fourier space, then transform it to real space.
 void initializef();
 #if calculate_SIGW
+/// Allocate and zero the six tensor components used by the inflationary GW module.
 void initializeGW();
 #endif
+/// Run the complete initialization sequence and write the initial output record.
 void initialize_simulation();
+/// Convert the final lattice state into initial data for the separate-universe deltaN evolution.
 void initializeN();
+/// Convert inflationary output into initial data for the optional post-inflationary stage.
 void initialize_post_inflation();
 
-// Field evolution routines.
+// Field evolution routines. The step argument is expressed in the active code-time variable.
+/// Advance the inflationary fields by one leapfrog drift.
 void evolve_fields(double d);
+/// Advance the inflationary field derivatives and scale-factor variables by one leapfrog kick.
 void evolve_derivs(double d);
-void evolve_scale(double d);
+/// Advance the separate-universe fields by one leapfrog drift.
 void evolve_fieldsN(double d);
+/// Advance the separate-universe field derivatives by one leapfrog kick.
 void evolve_derivsN(double d);
 
 // Energy diagnostics.
+/// Return the box-averaged scalar gradient energy density in code units.
 double gradient_energy();
+/// Return the box-averaged scalar kinetic energy density in code units.
 double kin_energy();
+/// Return the box-averaged scalar potential energy density in code units.
 double potential_energy();
 
 // Potential interface.
+/// Evaluate the configured potential at a field value in code units.
 double potential(double field_value);
+/// Evaluate the configured potential derivative at a lattice site.
 double potential_derivative(int i, int j, int k);
+/// Evaluate the configured potential derivative without lattice-index bookkeeping.
 double potential_derivative_from_value(double field_value);
+/// Evaluate the potential and derivative together, optionally updating an interpolation hint.
 void evaluate_potential_from_value(double field_value, int hint, int lookback, int* next_hint, double& pot, double& pot_deriv);
+/// Return V'/V at a lattice site for the separate-universe equations.
 double pot_ratio(int i, int j, int k);
+/// Return V'/V at an arbitrary field value.
 double pot_ratio_from_value(double field_value);
 
 // Output routines.
+/// Write the resolved run configuration to the metadata output.
 void output_parameters();
+/// Write inflationary outputs; expensive products are controlled by the argument and run-time flags.
 void save(int force);
+/// Write outputs that are required only at the end of inflation.
 void save_last();
-void saveN();
+/// Write final deltaN products and record any incomplete-patch warning.
+void saveN(FILE* output_log);
+/// Write outputs for the post-inflationary stage.
 void save_post_inflation(int force);
 
 // Utility helpers.
+/// Load a single-column numerical input file into a vector.
 void load_vector(const std::string& filename, std::vector<double>& vec);
+/// Create the main output directory if needed and reject conflicting non-directory paths.
 bool ensure_results_directory();
+/// Return the configured inflation integrator name for logs and metadata.
 const char* integrator_name();
 #if post_inflation
+/// Return the configured post-inflation integrator name.
 const char* post_inflation_integrator_name();
 #endif
 #if perform_deltaN
+/// Return the configured deltaN integrator name.
 const char* deltaN_integrator_name();
 #endif
+/// Report whether inflation uses staggered leapfrog derivatives.
 inline bool inflation_uses_staggered_derivatives() {
     return integrator == INTEGRATOR_LEAPFROG;
 }
 #if perform_deltaN
+/// Report whether the deltaN loop uses staggered leapfrog derivatives.
 inline bool deltaN_uses_staggered_derivatives() {
     return deltaN_integrator == INTEGRATOR_LEAPFROG;
 }
+/// Return whether a separate-universe patch has not yet reached the selected hypersurface.
+bool deltaN_patch_is_active(double field_value);
 #endif
 #if post_inflation
+/// Report whether the post-inflationary loop uses staggered leapfrog derivatives.
 inline bool post_inflation_uses_staggered_derivatives() {
     return post_inflation_integrator == INTEGRATOR_LEAPFROG;
 }
 #endif
 
-// Main evolution drivers.
+// Main evolution drivers. Each owns the complete time loop for one simulation stage.
+/// Evolve the nonlinear inflationary lattice to the requested final scale factor.
 void run_evolution_loop(FILE* output_);
 #if perform_deltaN
+/// Evolve each lattice site as an independent homogeneous patch and construct deltaN.
 void run_deltaN_loop(FILE* output_);
 #endif
 #if post_inflation
+/// Evolve the post-inflationary scalar and tensor systems.
 void run_post_inflation_loop(FILE* output_);
 #endif

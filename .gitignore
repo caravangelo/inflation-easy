@@ -7,6 +7,8 @@ __MACOSX/
 
 # Ignore Jupyter checkpoints and workspace metadata
 **/.ipynb_checkpoints/
+**/__pycache__/
+*.pyc
 notebooks/.jupyter/
 
 # Ignore object files and build artifacts
@@ -24,5 +26,7 @@ results/
 pedagogical_runs/
 .pedagogical_backup/
 
-# Keep manuscript artifacts out of the code repository
-latex/
+# Manuscripts are maintained in their respective Overleaf projects
+/latex/
+/latex_cpc/
+/latex_science_paper/

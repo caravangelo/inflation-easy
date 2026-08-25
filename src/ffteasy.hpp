@@ -1,6 +1,11 @@
 /*
-This code is an adaptation of FFTEASY by G. Felder
-*/
+ * In-place radix-2 FFT routines adapted from FFTEASY by G. Felder.
+ *
+ * `forward` is +1 for real/complex to Fourier space and -1 for the inverse.
+ * Real n-dimensional transforms store the final Nyquist plane separately in
+ * `fnyquist`; callers must preserve that buffer between forward and inverse
+ * transforms. Array sizes must be powers of two.
+ */
 
 #pragma once
 #include <cstdlib>
@@ -9,14 +14,14 @@ This code is an adaptation of FFTEASY by G. Felder
 
 //#define float double // only use this if you want to set everything to double
 
-// Simple complex struct parametrized by scalar type T
+// Minimal interleaved-complex view used by the in-place transforms.
 template <typename T>
 struct cpx {
     T real;
     T imag;
 } ;
 
-// ---------- Core 1D complex FFT on strided data ----------
+// Core one-dimensional complex FFT on data separated by `skip` complex entries.
 template <typename T>
 inline void fftc1(T f[], int N, int skip, int forward) {
     int b, index1, index2, trans_size, trans;
@@ -69,7 +74,7 @@ inline void fftc1(T f[], int N, int skip, int forward) {
     }
 }
 
-// ---------- n-D complex FFT (sizes are complex sizes) ----------
+// Apply the complex transform dimension by dimension; sizes are complex lengths.
 template <typename T>
 inline void fftcn(T f[], int ndims, int size[], int forward) {
     int i, j, dim;
@@ -87,7 +92,7 @@ inline void fftcn(T f[], int ndims, int size[], int forward) {
     }
 }
 
-// ---------- 1D real FFT ----------
+// One-dimensional real transform using packed complex storage.
 template <typename T>
 inline void fftr1(T f[], int N, int forward) {
     int b;
@@ -122,7 +127,8 @@ inline void fftr1(T f[], int N, int forward) {
     }
 }
 
-// ---------- n-D real FFT (sizes are real sizes; Nyquist plane split) ----------
+// N-dimensional real transform. `size` contains real dimensions and is restored
+// before return; the final-dimension Nyquist plane is stored in `fnyquist`.
 template <typename T>
 inline void fftrn(T f[], T fnyquist[], int ndims, int size[], int forward) {
     int i, j, b;
@@ -189,7 +195,7 @@ inline void fftrn(T f[], T fnyquist[], int ndims, int size[], int forward) {
     std::free(indices);
 }
 
-// ---------- Public wrappers (C-style signatures) ----------
+// Typed wrappers retained for the call sites inherited from LATTICEEASY.
 
 // FLOAT versions (for GW arrays)
 inline void fftc1f(float* f, int N, int skip, int forward)                    { fftc1<float>(f,N,skip,forward); }
