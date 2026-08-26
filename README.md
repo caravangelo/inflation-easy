@@ -252,7 +252,7 @@ make test-release
 `make test-spatial` remains available when only the second-, fourth-, and
 sixth-order spatial operators and their Fourier eigenvalues need to be checked.
 
-## Jupyter Notebook
+## Jupyter Notebooks
 
 Two notebooks are included:
 
