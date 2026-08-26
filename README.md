@@ -125,7 +125,7 @@ The most commonly adjusted run-time keys in `params.txt` are summarized below.
 - `af`: final scale factor for the inflationary evolution. If omitted, it defaults to `2*N`.
 - `initial_mass_squared`: optional mass-squared contribution to the initial inflaton mode frequency, in the same internal code units as $k_{\rm eff}^2$. If omitted, the initializer uses $\omega_k^2=k_{\rm eff}^2$; if supplied, it uses $\omega_k^2=k_{\rm eff}^2+m_{\rm init}^2$, with `initial_mass_squared` providing $m_{\rm init}^2$.
 - `linear_metric_perturbations`: set to `1` to add the leading linear scalar metric correction during the inflationary evolution. It defaults to `0` and, as a run-time option, does not require recompilation.
-- `output_bispectrum`: set to `1` to compute the scalar-field bispectrum at the final inflationary time. The resulting `bispectra.dat` file contains only equilateral configurations and does not contain general triangle configurations. This calculation is computationally expensive for large lattices and is disabled by default.
+- `output_bispectrum`: set to `1` to compute the equilateral scalar-field bispectrum at the final inflationary time. The resulting `bispectra.dat` file contains only equilateral configurations and does not contain general triangle configurations. This calculation is computationally expensive for large lattices and is disabled by default.
 
 #### $\delta N$ Stage
 
