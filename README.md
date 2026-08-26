@@ -135,7 +135,7 @@ These parameters are used when `perform_deltaN=1`:
 
 - `dN`, `Nend`: integration step and maximum integration magnitude. `dN` must be nonzero; a negative value integrates backward and requires `use_phiref_manual=1`, while `Nend` remains nonnegative.
 
-Important: `monotonic_potential` / `antimonotonic_potential` select the compile-time deltaN stopping potential criterion in `src/parameters.h`; they are not `params.txt` keys. For forward integration, the implemented criteria are: monotonic -> evolve while `|phi| > |phi_ref|`, anti-monotonic -> evolve while `|phi| < |phi_ref|`, and if both are `0`, generic potential fallback -> evolve while `V(phi) > V(phi_ref)`. Backward integration reverses these comparisons and uses the manually supplied reference field.
+Important: `monotonic_potential` / `antimonotonic_potential` select the compile-time deltaN stopping potential criterion in `src/parameters.h`; they are not `params.txt` keys. For forward integration, the implemented criteria are: monotonic -> evolve while `|phi| > |phi_ref|`, anti-monotonic -> evolve while `|phi| < |phi_ref|`, and if both are `0`, generic potential fallback -> evolve while `V(phi) > V(phi_ref)`.
 
 If `Nend` is reached before every patch crosses the selected surface, the code records a warning in both the terminal and `results/output.txt`. The deltaN histogram then uses only completed patches, while incomplete sites are set to zero in spatial and spectral products. The post-inflationary stage requires every patch to complete and stops with an error otherwise.
 
