@@ -121,6 +121,8 @@ The most commonly adjusted run-time keys in `params.txt` are summarized below.
 
 #### Inflationary Initialization and Evolution
 
+- `initial_field`: homogeneous initial value of the inflaton, in code units.
+- `initial_derivative`: homogeneous initial inflaton velocity, in code units.
 - `dt`: inflationary time step.
 - `af`: final scale factor for the inflationary evolution. If omitted, it defaults to `2*N`.
 - `initial_mass_squared`: optional mass-squared contribution to the initial inflaton mode frequency, in the same internal code units as $k_{\rm eff}^2$. If omitted, the initializer uses $\omega_k^2=k_{\rm eff}^2$; if supplied, it uses $\omega_k^2=k_{\rm eff}^2+m_{\rm init}^2$, with `initial_mass_squared` providing $m_{\rm init}^2$.
