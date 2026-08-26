@@ -1,4 +1,9 @@
 // runtime_parameters.cpp - Run-time configuration defaults and parser
+//
+// Values in this file provide a complete fallback configuration. At program
+// startup, load_runtime_parameters() applies recognized key-value overrides
+// from params.txt, recomputes derived quantities, and sanitizes integrator
+// controls. Compile-time switches remain exclusively in parameters.h.
 
 #include "parameters.h"
 
@@ -6,10 +11,12 @@
 #include <cctype>
 #include <cerrno>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <string>
 
 // -------------------- Defaults --------------------
@@ -27,6 +34,9 @@ double V0 = 3.338e-13;
 #endif
 
 double rescale_B = std::sqrt(V0);
+
+int linear_metric_perturbations = 0;
+std::optional<double> initial_mass_squared;
 
 #if !numerical_potential
 double ns = 0.97;
@@ -112,6 +122,7 @@ int int_errN = 5;
 double dx = L / static_cast<double>(N);
 
 namespace {
+// Remove leading and trailing ASCII whitespace from a parser token.
 std::string trim(const std::string& s) {
     size_t b = 0;
     while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b]))) ++b;
@@ -120,24 +131,29 @@ std::string trim(const std::string& s) {
     return s.substr(b, e - b);
 }
 
+// Parse a complete integer token; partial conversions are rejected.
 bool parse_int(const std::string& s, int& out) {
     char* end = nullptr;
     errno = 0;
     long v = std::strtol(s.c_str(), &end, 10);
-    if (errno != 0 || !end || *end != '\0') return false;
+    if (errno != 0 || !end || end == s.c_str() || *end != '\0'
+        || v < std::numeric_limits<int>::min()
+        || v > std::numeric_limits<int>::max()) return false;
     out = static_cast<int>(v);
     return true;
 }
 
+// Parse a complete floating-point token; partial conversions are rejected.
 bool parse_double(const std::string& s, double& out) {
     char* end = nullptr;
     errno = 0;
     double v = std::strtod(s.c_str(), &end);
-    if (errno != 0 || !end || *end != '\0') return false;
+    if (errno != 0 || !end || end == s.c_str() || *end != '\0') return false;
     out = v;
     return true;
 }
 
+// Accept documented integrator names, common aliases, or the corresponding enum value.
 bool parse_integrator(const std::string& raw, int& out) {
     std::string s = raw;
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
@@ -165,12 +181,14 @@ bool parse_integrator(const std::string& raw, int& out) {
     return false;
 }
 
+// Fall back to leapfrog if an integrator value is outside the supported enum.
 void sanitize_integrator_choice(int& value) {
     if (value < INTEGRATOR_LEAPFROG || value > INTEGRATOR_RK45) {
         value = INTEGRATOR_LEAPFROG;
     }
 }
 
+// Apply the same validation to every simulation stage compiled into the executable.
 void sanitize_all_integrator_choices() {
     sanitize_integrator_choice(integrator);
 #if perform_deltaN
@@ -181,6 +199,7 @@ void sanitize_all_integrator_choices() {
 #endif
 }
 
+// Enforce positive tolerances and a consistent allowed RK45 step interval.
 void sanitize_rk45_controls() {
     if (!(rk45_min_dt > 0.0)) rk45_min_dt = std::abs(dt) * 1e-6;
     if (!(rk45_max_dt > 0.0)) rk45_max_dt = std::abs(dt);
@@ -190,8 +209,140 @@ void sanitize_rk45_controls() {
     if (!(rk45_rel_tol > 0.0)) rk45_rel_tol = 1e-6;
     if (!(rk45_safety > 0.0 && rk45_safety < 1.0)) rk45_safety = 0.9;
 }
+
+[[noreturn]] void invalid_runtime_configuration(const char* message) {
+    std::fprintf(stderr, "Invalid run-time configuration: %s\n", message);
+    std::exit(EXIT_FAILURE);
+}
+
+void require_finite(const char* name, double value) {
+    if (!std::isfinite(value)) {
+        std::fprintf(stderr, "Invalid run-time configuration: %s must be finite.\n", name);
+        std::exit(EXIT_FAILURE);
+    }
+}
+
+void require_positive(const char* name, double value) {
+    require_finite(name, value);
+    if (!(value > 0.0)) {
+        std::fprintf(stderr, "Invalid run-time configuration: %s must be positive.\n", name);
+        std::exit(EXIT_FAILURE);
+    }
+}
+
+// Validate the resolved configuration once, before any lattice allocation or evolution.
+// Bounds here are limited to values required for well-defined arithmetic and loops.
+void validate_runtime_parameters() {
+    require_finite("rescale_s", rescale_s);
+    const double singularity_tolerance = 16.0 * std::numeric_limits<double>::epsilon();
+    if (integrator == INTEGRATOR_LEAPFROG
+        && std::abs(rescale_s + 1.0) <= singularity_tolerance) {
+        invalid_runtime_configuration(
+            "rescale_s is too close to -1 for the leapfrog scale-factor update; use RK4/RK45 or another rescaling.");
+    }
+    require_positive("V0", V0);
+    require_positive("rescale_B", rescale_B);
+    require_finite("initial_field", initial_field);
+    require_finite("initial_derivative", initial_derivative);
+    if (initial_mass_squared.has_value()) {
+        require_finite("initial_mass_squared", *initial_mass_squared);
+    }
+#if !numerical_potential
+    require_finite("ns", ns);
+#endif
+
+    require_positive("L", L);
+    require_positive("dt", dt);
+    require_positive("dx", dx);
+    require_finite("af", af);
+    if (af < 1.0) {
+        invalid_runtime_configuration("af must be at least 1, the initial scale factor.");
+    }
+
+    if (output_freq <= 0) {
+        invalid_runtime_configuration("output_freq must be a positive number of steps.");
+    }
+    if (output_infrequent_freq <= 0) {
+        invalid_runtime_configuration("output_infrequent_freq must be a positive number of steps.");
+    }
+    if (nbins <= 0) {
+        invalid_runtime_configuration("nbins must be positive.");
+    }
+    const std::size_t lattice_sites =
+        static_cast<std::size_t>(N) * static_cast<std::size_t>(N) * static_cast<std::size_t>(N);
+    if (static_cast<std::size_t>(nbins) > lattice_sites) {
+        invalid_runtime_configuration("nbins must not exceed the number of lattice sites N^3.");
+    }
+
+    require_positive("rk45_abs_tol", rk45_abs_tol);
+    require_positive("rk45_rel_tol", rk45_rel_tol);
+    require_positive("rk45_min_dt", rk45_min_dt);
+    require_positive("rk45_max_dt", rk45_max_dt);
+    require_finite("rk45_safety", rk45_safety);
+    if (!(rk45_safety > 0.0 && rk45_safety < 1.0)) {
+        invalid_runtime_configuration("rk45_safety must lie strictly between 0 and 1.");
+    }
+    if (rk45_min_dt > rk45_max_dt) {
+        invalid_runtime_configuration("rk45_min_dt must not exceed rk45_max_dt.");
+    }
+
+    require_finite("low_cutoff_index", low_cutoff_index);
+    require_finite("high_cutoff_index", high_cutoff_index);
+    if (low_cutoff_index < 0.0 || high_cutoff_index < 0.0) {
+        invalid_runtime_configuration("cutoff indices must be nonnegative.");
+    }
+    if (high_cutoff_index > 0.0 && low_cutoff_index > high_cutoff_index) {
+        invalid_runtime_configuration("low_cutoff_index must not exceed high_cutoff_index.");
+    }
+
+#if perform_deltaN
+    require_finite("dN", dN);
+    if (dN == 0.0) {
+        invalid_runtime_configuration("dN must be nonzero; use its sign to select the integration direction.");
+    }
+    require_finite("Nend", Nend);
+    if (Nend < 0.0) {
+        invalid_runtime_configuration("Nend is a nonnegative integration magnitude.");
+    }
+    if (dN < 0.0 && !use_phiref_manual) {
+        invalid_runtime_configuration("backward deltaN evolution (dN < 0) requires use_phiref_manual = 1.");
+    }
+    if (use_phiref_manual) {
+        require_finite("phiref_manual_value", phiref_manual_value);
+    }
+    require_finite("eta_log", eta_log);
+    if (output_LOG && eta_log == 0.0) {
+        invalid_runtime_configuration("eta_log must be nonzero when output_LOG is enabled.");
+    }
+#endif
+
+#if post_inflation
+    require_positive("horizon_factor", horizon_factor);
+    require_finite("omega", omega);
+    const double one_plus_omega = 1.0 + omega;
+    const double five_plus_three_omega = 5.0 + 3.0 * omega;
+    const double denominator_tolerance = 16.0 * std::numeric_limits<double>::epsilon();
+    if (std::abs(one_plus_omega) <= denominator_tolerance) {
+        invalid_runtime_configuration("omega is too close to -1, where the post-inflation equations are singular.");
+    }
+    if (std::abs(five_plus_three_omega) <= denominator_tolerance) {
+        invalid_runtime_configuration("omega is too close to -5/3, where the zeta-to-Phi map is singular.");
+    }
+    const double Phi_from_zeta = 3.0 * one_plus_omega / five_plus_three_omega;
+    if (!std::isfinite(Phi_from_zeta)) {
+        invalid_runtime_configuration("omega produces a non-finite zeta-to-Phi conversion factor.");
+    }
+    require_positive("dt_post_inflation", dt_post_inflation);
+    require_finite("af_post_inflation", af_post_inflation);
+    if (af_post_inflation < 1.0) {
+        invalid_runtime_configuration("af_post_inflation must be at least 1, the post-inflation initial scale factor.");
+    }
+#endif
+}
 } // namespace
 
+// Load optional key-value overrides. Unknown, malformed, or compile-time-only
+// entries are reported and ignored; defaults remain active for omitted keys.
 void load_runtime_parameters(const char* filename) {
     std::ifstream in(filename);
     if (!in.good()) {
@@ -203,6 +354,7 @@ void load_runtime_parameters(const char* filename) {
 #endif
         sanitize_rk45_controls();
         sanitize_all_integrator_choices();
+        validate_runtime_parameters();
         return;
     }
 
@@ -249,6 +401,13 @@ void load_runtime_parameters(const char* filename) {
 #endif
         else if (key == "initial_field" && parse_double(val, dval)) initial_field = dval;
         else if (key == "initial_derivative" && parse_double(val, dval)) initial_derivative = dval;
+        else if (key == "initial_mass_squared" && parse_double(val, dval)
+              && std::isfinite(dval)) {
+            initial_mass_squared = dval;
+        }
+        else if (key == "linear_metric_perturbations" && parse_int(val, ival)) {
+            linear_metric_perturbations = (ival != 0);
+        }
         else if (key == "L" && parse_double(val, dval)) L = dval;
         else if (key == "dt" && parse_double(val, dval)) dt = dval;
         else if (key == "inflation_integrator") {
@@ -352,6 +511,7 @@ void load_runtime_parameters(const char* filename) {
     if (!rk45_max_overridden || rk45_max_dt <= 0.0) rk45_max_dt = std::abs(dt);
     sanitize_rk45_controls();
     sanitize_all_integrator_choices();
+    validate_runtime_parameters();
 #if !perform_deltaN
     if (ignored_deltaN_runtime_keys) {
         std::fprintf(stderr, "Ignoring deltaN runtime parameters in %s because perform_deltaN=0.\n", filename);
@@ -364,6 +524,7 @@ void load_runtime_parameters(const char* filename) {
 #endif
 }
 
+// Stable text representation used in logs and reproducibility metadata.
 const char* integrator_name() {
     switch (integrator) {
         case INTEGRATOR_LEAPFROG: return "leapfrog";
@@ -374,6 +535,7 @@ const char* integrator_name() {
 }
 
 #if perform_deltaN
+// Stable text representation of the deltaN integrator.
 const char* deltaN_integrator_name() {
     switch (deltaN_integrator) {
         case INTEGRATOR_LEAPFROG: return "leapfrog";
@@ -385,6 +547,7 @@ const char* deltaN_integrator_name() {
 #endif
 
 #if post_inflation
+// Stable text representation of the post-inflation integrator.
 const char* post_inflation_integrator_name() {
     switch (post_inflation_integrator) {
         case INTEGRATOR_LEAPFROG: return "leapfrog";

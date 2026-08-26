@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <optional>
+
 // -------------------- Compile-time feature toggles --------------------
 
 // Set to 1 to enable a numerical potential loaded from file, 0 for analytic expression.
@@ -42,6 +44,15 @@
 // Number of grid points per spatial dimension (total grid size N^3).
 // Must be a power of 2 for the FFT routines used in the code.
 const int N = 128;
+static_assert(N >= 2 && (N & (N - 1)) == 0,
+              "N must be a power of two and at least 2 for the FFT routines.");
+
+// Spatial finite-difference order. Choose 2 (default), 4, or 6, then recompile.
+// The selection is applied consistently to the Laplacian, directional derivatives,
+// Fourier-space effective momenta, vacuum initialization, and tensor projection.
+#ifndef SPATIAL_STENCIL_ORDER
+#define SPATIAL_STENCIL_ORDER 2
+#endif
 
 // -------------------- Monotonicity hints (compile-time) --------------------
 
@@ -76,7 +87,7 @@ const int N = 128;
 // Random seed used to initialize vacuum fluctuations.
 extern int seed;
 
-// Field-rescaling exponent used by internal conventions.
+// Scale-factor exponent in the internal time-coordinate rescaling.
 // Keep at 0 unless a different scaling has been validated.
 extern double rescale_s;
 
@@ -97,6 +108,16 @@ extern double ns;
 // Homogeneous initial field value and time derivative (code units).
 extern double initial_field;
 extern double initial_derivative;
+
+// Optional mass-squared contribution to the initial mode frequency, in the
+// same code units as the lattice momentum squared. When omitted from
+// params.txt, the initializer uses the massless frequency.
+extern std::optional<double> initial_mass_squared;
+
+// Set linear_metric_perturbations = 1 in params.txt to include the leading
+// linear scalar metric correction in the inflaton EOM. It is off by default
+// and affects only the main inflationary evolution.
+extern int linear_metric_perturbations;
 
 // Comoving box size and main time step (code units).
 extern double L;
@@ -135,7 +156,8 @@ extern int output_freq;
 extern int output_infrequent_freq;
 
 #if perform_deltaN
-// deltaN integration controls.
+// deltaN integration controls. dN is a signed nonzero step; Nend is a
+// nonnegative integration magnitude. A negative dN requires a manual phiref.
 extern double dN;
 extern double Nend;
 
@@ -147,6 +169,7 @@ extern double phiref_manual_value;
 
 #if post_inflation
 // Post-inflation controls (used only if post_inflation==1).
+// Sets the initial Hubble scale relative to the lattice resolution.
 extern double horizon_factor;
 extern double omega;
 extern double dt_post_inflation;

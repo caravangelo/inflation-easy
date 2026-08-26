@@ -1,13 +1,16 @@
 // potential.cpp — Inflationary potential (analytic or tabulated)
 //
 // This file defines the inflationary potential and its derivatives.
-// For analytic models (e.g. m²ϕ²), customize `analytic_potential` and its derivative.
+// For analytic models, customize `analytic_potential` and its derivative together.
 // For numerical models, potential values are interpolated from tabulated data.
 
 #include "main.h"
 
 #if numerical_potential
 namespace {
+// Locate the upper endpoint of the interpolation interval in a descending field
+// table. A valid hint makes repeated evaluations local; otherwise binary search
+// supplies a safe starting interval.
 int find_bracketing_index(double field_value, int start_index) {
     const int n = static_cast<int>(field_numerical.size());
     if (n < 2) {
@@ -49,6 +52,7 @@ int find_bracketing_index(double field_value, int start_index) {
     return l;
 }
 
+// Linearly interpolate a tabulated quantity using a validated bracket index.
 double interpolate_from_table(
     double field_value,
     int l,
@@ -71,19 +75,21 @@ double interpolate_from_table(
 
 #if !numerical_potential
 // -------------------------------------------------------------
-// Analytic potential (default: quadratic V(ϕ) = 1/2 m²ϕ²)
+// Analytic potential (default: hilltop example described in the README)
 // -------------------------------------------------------------
 
+// Users defining an analytic model must update this function and its derivative.
 double analytic_potential(double field_value) {
     return V0 * (1.0 - (1.0 - ns) / 4.0 * pw2(field_value)) / pw2(rescale_B);
 }
 
+// Analytic derivative paired with analytic_potential().
 double analytic_potential_derivative(double field_value) {
     return -V0 * (1.0 - ns) / 2.0 * field_value / pw2(rescale_B);
 }
 #endif
 
-// Nothing to customize in the following functions
+// Unified potential interface used by the evolution and output modules.
 
 // -------------------------------------------------------------
 // Return the potential V(ϕ) at a given field value (interpolated or analytic)
@@ -111,6 +117,7 @@ double potential_derivative(int i, int j, int k) {
 #endif
 }
 
+// Evaluate V' without modifying the per-site interpolation hints.
 double potential_derivative_from_value(double field_value) {
 #if numerical_potential
     const int l = find_bracketing_index(field_value, 1);
@@ -120,6 +127,8 @@ double potential_derivative_from_value(double field_value) {
 #endif
 }
 
+// Evaluate V and V' with one table lookup. The optional next_hint allows callers
+// that own their interpolation state to reuse the bracket on the next call.
 void evaluate_potential_from_value(
     double field_value,
     int hint,
@@ -191,6 +200,7 @@ double pot_ratio(int i, int j, int k) {
     return pot_deriv / pot;
 }
 
+// Value-based V'/V helper used when no lattice interpolation state is available.
 double pot_ratio_from_value(double field_value) {
 #if numerical_potential
     const int l = find_bracketing_index(field_value, 1);

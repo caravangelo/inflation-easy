@@ -6,6 +6,9 @@
 
 
 #include "main.h"
+#include "linear_metric.h"
+
+#include <limits>
 
 // High-level flow in this module:
 // 1) Inflation loop (integrator selectable: leapfrog, RK4, RK45).
@@ -18,91 +21,67 @@
 // - RK45 acceptance based on weighted RMS norm with abs/rel tolerances.
 // - Output formats and file names consumed by downstream analysis scripts.
 
-// -------------------- Laplacians --------------------
-
-// Helper for periodic indexing
-inline int INCREMENT(int i) {
-    return (i == N - 1) ? 0 : i + 1;
-}
-
-// Decrement index with periodic wrapping (i → i-1 mod N)
-inline int DECREMENT(int i) {
-    return (i == 0) ? N - 1 : i - 1;
-}
-
-// Laplacian for real-space arrays (works for double or float vectors)
-template <typename T>
-inline T lapl(int i, int j, int k, const std::vector<T>& field) {
-    if (i == 0 || j == 0 || k == 0 || i == N - 1 || j == N - 1 || k == N - 1) {
-        return (
-        field[idx(i,j,INCREMENT(k))] + field[idx(i,j,DECREMENT(k))] +
-        field[idx(i,INCREMENT(j),k)] + field[idx(i,DECREMENT(j),k)] +
-        field[idx(INCREMENT(i),j,k)] + field[idx(DECREMENT(i),j,k)] -
-        T(6) * field[idx(i,j,k)]
-        );
-    } else {
-        return (
-        field[idx(i,j,k+1)] + field[idx(i,j,k-1)] +
-        field[idx(i,j+1,k)] + field[idx(i,j-1,k)] +
-        field[idx(i+1,j,k)] + field[idx(i-1,j,k)] -
-        T(6) * field[idx(i,j,k)]
-        );
-    }
-}
-
 #if calculate_SIGW || post_inflation
-// Central difference for spatial derivative of a scalar field (double or float)
 template <typename T>
 inline T dfdx(int dim, int i, int j, int k, const std::vector<T>& field) {
-    const double half_over_dx = 0.5 / dx;
-    if (dim == 0) {
-        if (i == 0 || i == N - 1) {
-            return T( (field[idx(INCREMENT(i), j, k)] - field[idx(DECREMENT(i), j, k)]) * half_over_dx );
-        } else {
-            return T( (field[idx(i+1, j, k)] - field[idx(i-1, j, k)]) * half_over_dx );
+    if constexpr (spatial::order == 2) {
+        const double half_over_dx = 0.5 / dx;
+        if (dim == 0) {
+            if (i == 0 || i == N - 1) {
+                return T((field[idx(spatial::increment(i), j, k)]
+                        - field[idx(spatial::decrement(i), j, k)]) * half_over_dx);
+            }
+            return T((field[idx(i + 1, j, k)] - field[idx(i - 1, j, k)]) * half_over_dx);
         }
-    } else if (dim == 1) {
-        if (j == 0 || j == N - 1) {
-            return T( (field[idx(i, INCREMENT(j), k)] - field[idx(i, DECREMENT(j), k)]) * half_over_dx );
-        } else {
-            return T( (field[idx(i, j+1, k)] - field[idx(i, j-1, k)]) * half_over_dx );
+        if (dim == 1) {
+            if (j == 0 || j == N - 1) {
+                return T((field[idx(i, spatial::increment(j), k)]
+                        - field[idx(i, spatial::decrement(j), k)]) * half_over_dx);
+            }
+            return T((field[idx(i, j + 1, k)] - field[idx(i, j - 1, k)]) * half_over_dx);
         }
-    } else { // dim == 2
         if (k == 0 || k == N - 1) {
-            return T( (field[idx(i, j, INCREMENT(k))] - field[idx(i, j, DECREMENT(k))]) * half_over_dx );
-        } else {
-            return T( (field[idx(i, j, k+1)] - field[idx(i, j, k-1)]) * half_over_dx );
+            return T((field[idx(i, j, spatial::increment(k))]
+                    - field[idx(i, j, spatial::decrement(k))]) * half_over_dx);
         }
+        return T((field[idx(i, j, k + 1)] - field[idx(i, j, k - 1)]) * half_over_dx);
+    } else {
+        return spatial::first_derivative(dim, i, j, k, field, dx);
     }
 }
 
-inline double d2_same_state(int dim, int i, int j, int k, size_t id, const std::vector<double>& field) {
-    const int ip = (dim == 0) ? INCREMENT(i) : i;
-    const int im = (dim == 0) ? DECREMENT(i) : i;
-    const int jp = (dim == 1) ? INCREMENT(j) : j;
-    const int jm = (dim == 1) ? DECREMENT(j) : j;
-    const int kp = (dim == 2) ? INCREMENT(k) : k;
-    const int km = (dim == 2) ? DECREMENT(k) : k;
-    const double inv_dx2 = 1.0 / (dx * dx);
-
-    if (dim == 0) return (field[idx(ip, j,  k)] - 2.0 * field[id] + field[idx(im, j,  k)]) * inv_dx2;
-    if (dim == 1) return (field[idx(i,  jp, k)] - 2.0 * field[id] + field[idx(i,  jm, k)]) * inv_dx2;
-    return             (field[idx(i,  j,  kp)] - 2.0 * field[id] + field[idx(i,  j,  km)]) * inv_dx2;
+inline double d2_same_state(
+    int dim, int i, int j, int k, size_t id, const std::vector<double>& field)
+{
+    if constexpr (spatial::order == 2) {
+        const int ip = dim == 0 ? spatial::increment(i) : i;
+        const int im = dim == 0 ? spatial::decrement(i) : i;
+        const int jp = dim == 1 ? spatial::increment(j) : j;
+        const int jm = dim == 1 ? spatial::decrement(j) : j;
+        const int kp = dim == 2 ? spatial::increment(k) : k;
+        const int km = dim == 2 ? spatial::decrement(k) : k;
+        const double inv_dx2 = 1.0 / (dx * dx);
+        if (dim == 0) return (field[idx(ip, j, k)] - 2.0 * field[id] + field[idx(im, j, k)]) * inv_dx2;
+        if (dim == 1) return (field[idx(i, jp, k)] - 2.0 * field[id] + field[idx(i, jm, k)]) * inv_dx2;
+        return (field[idx(i, j, kp)] - 2.0 * field[id] + field[idx(i, j, km)]) * inv_dx2;
+    } else {
+        return spatial::second_derivative(dim, i, j, k, id, field, dx);
+    }
 }
 
 inline double d2_cross_state(int d1, int d2, int i, int j, int k, const std::vector<double>& field) {
-    const int ip = (d1 == 0 || d2 == 0) ? INCREMENT(i) : i;
-    const int im = (d1 == 0 || d2 == 0) ? DECREMENT(i) : i;
-    const int jp = (d1 == 1 || d2 == 1) ? INCREMENT(j) : j;
-    const int jm = (d1 == 1 || d2 == 1) ? DECREMENT(j) : j;
-    const int kp = (d1 == 2 || d2 == 2) ? INCREMENT(k) : k;
-    const int km = (d1 == 2 || d2 == 2) ? DECREMENT(k) : k;
-
-    const double fpp = field[idx(ip, jp, kp)];
-    const double fpm = field[idx(ip, jm, km)];
-    const double fmp = field[idx(im, jp, kp)];
-    const double fmm = field[idx(im, jm, km)];
-    return (fpp - fpm - fmp + fmm) / (4.0 * dx * dx);
+    if constexpr (spatial::order == 2) {
+        const int ip = (d1 == 0 || d2 == 0) ? spatial::increment(i) : i;
+        const int im = (d1 == 0 || d2 == 0) ? spatial::decrement(i) : i;
+        const int jp = (d1 == 1 || d2 == 1) ? spatial::increment(j) : j;
+        const int jm = (d1 == 1 || d2 == 1) ? spatial::decrement(j) : j;
+        const int kp = (d1 == 2 || d2 == 2) ? spatial::increment(k) : k;
+        const int km = (d1 == 2 || d2 == 2) ? spatial::decrement(k) : k;
+        return (field[idx(ip, jp, kp)] - field[idx(ip, jm, km)]
+              - field[idx(im, jp, kp)] + field[idx(im, jm, km)]) / (4.0 * dx * dx);
+    } else {
+        return spatial::mixed_derivative(d1, d2, i, j, k, field, dx);
+    }
 }
 
 // -------------------- Stress-energy tensor (inflaton) --------------------
@@ -112,13 +91,14 @@ struct GradPack {
     double g[3];   // ∂_x φ, ∂_y φ, ∂_z φ
 } ;
 
+// Cache all scalar first derivatives needed by the six tensor-source components.
 inline void build_grad_pack(int i, int j, int k, GradPack& P) {
     P.g[0] = dfdx<double>(0, i, j, k, f);
     P.g[1] = dfdx<double>(1, i, j, k, f);
     P.g[2] = dfdx<double>(2, i, j, k, f);
 }
 
-// Stress-energy tensor component T_{lm} at site (i,j,k)
+// Return one unprojected scalar anisotropic-stress component from cached gradients.
 inline double stress_energy_fast(int l, int m, const GradPack& P) {
     return P.g[l] * P.g[m];
 }
@@ -131,7 +111,7 @@ double gradient_energy() {
     DECLARE_INDICES
     double gradient = 0.0;
     const double norm = pw2(1.0 / (a * dx));
-    LOOP gradient -= f[idx(i,j,k)] * lapl<double>(i, j, k, f);
+    LOOP gradient -= f[idx(i,j,k)] * spatial::laplacian(i, j, k, f);
     return 0.5 * gradient * norm / static_cast<double>(gridsize);
 }
 
@@ -144,12 +124,42 @@ double kin_energy() {
     return 0.5 * std::pow(a, 2.0 * rescale_s - 2.0) * deriv_energy;
 }
 
+namespace {
+
+// Apply one scalar leapfrog kick. Compile-time specialization keeps the metric
+// arithmetic entirely outside the per-site loop when the run-time option is off.
+template <bool IncludeLinearMetric>
+void evolve_scalar_derivs_leapfrog(
+    double d,
+    double laplnorm,
+    double friction,
+    double potnorm,
+    double metric_coefficient = 0.0,
+    double metric_field_mean = 0.0)
+{
+    DECLARE_INDICES
+#if parallel_calculation
+#pragma omp parallel for collapse(3)
+#endif
+    LOOP {
+        const size_t id = idx(i,j,k);
+        double rhs = laplnorm * spatial::laplacian(i, j, k, f)
+                   - friction * fd[id]
+                   - potnorm * potential_derivative(i, j, k);
+        if constexpr (IncludeLinearMetric) {
+            rhs += metric_coefficient * (f[id] - metric_field_mean);
+        }
+        fd[id] += d * rhs;
+    }
+}
+
+} // namespace
+
 // -------------------- Main Field Evolution --------------------
 
-// Leapfrog update of field derivatives
+// Apply a full leapfrog kick to the inflationary scalar, scale factor, and
+// optional tensor fields while preserving their staggered-time convention.
 void evolve_derivs(double d) {
-    DECLARE_INDICES
-
     const double laplnorm = std::pow(a, -2.0 * rescale_s) / pw2(dx);
     const double sfev1    = rescale_s + 1.0;
     const double sfev2    = -2.0 * rescale_s + 2.0;
@@ -166,18 +176,15 @@ void evolve_derivs(double d) {
     // Scalar field evolution
     const double friction = (2.0 + rescale_s) * ad / a;
     const double potnorm  = std::pow(a, 2.0 - 2.0 * rescale_s);
-
-#if parallel_calculation
-#pragma omp parallel for collapse(3)
-#endif
-    LOOP {
-        const size_t id = idx(i,j,k);
-
-        fd[id] += d * (
-        laplnorm * lapl<double>(i, j, k, f)
-        - friction * fd[id]
-        - potnorm * potential_derivative(i, j, k)
-        );
+    if (linear_metric_perturbations) {
+        const LinearMetricCorrection metric_correction =
+            compute_linear_metric_correction(f, fd, a, ad, ad2);
+        evolve_scalar_derivs_leapfrog<true>(
+            d, laplnorm, friction, potnorm,
+            metric_correction.rhs_coefficient,
+            metric_correction.field_mean);
+    } else {
+        evolve_scalar_derivs_leapfrog<false>(d, laplnorm, friction, potnorm);
     }
 
 #if calculate_SIGW
@@ -192,10 +199,10 @@ void evolve_derivs(double d) {
     for (int k=0; k<N; ++k) {
         const size_t id = idx(i,j,k);
 
-        // build gradients once
+        // Build gradients once and reuse them for all tensor components.
         GradPack G; build_grad_pack(i,j,k,G);
 
-        // explicit six components (double)
+        // Form the six stored components of the symmetric source in double precision.
         const double gx = G.g[0];
         const double gy = G.g[1];
         const double gz = G.g[2];
@@ -207,44 +214,44 @@ void evolve_derivs(double d) {
         const double T_xz = gx * gz;
         const double T_yz = gy * gz;
 
-        // compute each RHS entirely in double; cast once on store
+        // Evaluate each RHS in double precision and cast once on storage.
         {
-            const double lap_h = static_cast<double>(lapl<float>(i,j,k,hij[0]));
+            const double lap_h = static_cast<double>(spatial::laplacian(i,j,k,hij[0]));
             const double rhs = d * ( laplnorm * lap_h
             - friction * static_cast<double>(hijd[0][id])
             + srcAmp * T_xx );
             hijd[0][id] += static_cast<float>(rhs);
         }
         {
-            const double lap_h = static_cast<double>(lapl<float>(i,j,k,hij[1]));
+            const double lap_h = static_cast<double>(spatial::laplacian(i,j,k,hij[1]));
             const double rhs = d * ( laplnorm * lap_h
             - friction * static_cast<double>(hijd[1][id])
             + srcAmp * T_yy );
             hijd[1][id] += static_cast<float>(rhs);
         }
         {
-            const double lap_h = static_cast<double>(lapl<float>(i,j,k,hij[2]));
+            const double lap_h = static_cast<double>(spatial::laplacian(i,j,k,hij[2]));
             const double rhs = d * ( laplnorm * lap_h
             - friction * static_cast<double>(hijd[2][id])
             + srcAmp * T_zz );
             hijd[2][id] += static_cast<float>(rhs);
         }
         {
-            const double lap_h = static_cast<double>(lapl<float>(i,j,k,hij[3]));
+            const double lap_h = static_cast<double>(spatial::laplacian(i,j,k,hij[3]));
             const double rhs = d * ( laplnorm * lap_h
             - friction * static_cast<double>(hijd[3][id])
             + srcAmp * T_xy );
             hijd[3][id] += static_cast<float>(rhs);
         }
         {
-            const double lap_h = static_cast<double>(lapl<float>(i,j,k,hij[4]));
+            const double lap_h = static_cast<double>(spatial::laplacian(i,j,k,hij[4]));
             const double rhs = d * ( laplnorm * lap_h
             - friction * static_cast<double>(hijd[4][id])
             + srcAmp * T_xz );
             hijd[4][id] += static_cast<float>(rhs);
         }
         {
-            const double lap_h = static_cast<double>(lapl<float>(i,j,k,hij[5]));
+            const double lap_h = static_cast<double>(spatial::laplacian(i,j,k,hij[5]));
             const double rhs = d * ( laplnorm * lap_h
             - friction * static_cast<double>(hijd[5][id])
             + srcAmp * T_yz );
@@ -256,7 +263,7 @@ void evolve_derivs(double d) {
     ad += 0.5 * d * ad2;
 }
 
-// Update fields using current derivatives
+// Apply the leapfrog drift to all active fields and advance code time.
 void evolve_fields(double d) {
     DECLARE_INDICES
     t += d;
@@ -284,7 +291,8 @@ void evolve_fields(double d) {
 }
 
 namespace {
-// Reused stage/state buffers for RK methods to avoid per-step allocations.
+// Reused stage/state buffers for RK methods; ensure_size() allocates only when
+// the lattice size changes, avoiding allocations inside time-stepping loops.
 struct InflationRKScratch {
     std::vector<double> ftmp;
     std::vector<double> fdtmp;
@@ -324,43 +332,68 @@ struct InflationRKScratch {
 // false: inflation equations, true: post-inflation equations.
 bool g_use_post_inflation_rhs = false;
 
+#if post_inflation && calculate_SIGW
+// Coefficient multiplying the standard Newtonian-gauge post-inflationary
+// source in the tensor normalization used by InflationEasy.
+constexpr double POST_INFLATION_TENSOR_SOURCE_COEFFICIENT = -2.0;
+#endif
+
+// Restrict a proposed adaptive step to the configured and stage-specific bounds.
 double clamp_rk45_step(double h, double hmax) {
     const double hmin = std::max(1e-16, rk45_min_dt);
     const double hhi = std::max(hmin, hmax);
-    if (h < hmin) return hmin;
-    if (h > hhi) return hhi;
-    return h;
+    const double direction = std::signbit(h) ? -1.0 : 1.0;
+    return direction * std::clamp(std::abs(h), hmin, hhi);
 }
 
 constexpr int RK45_MAX_ATTEMPTS = 25;
 constexpr double RK45_MIN_STEP_GUARD = 1.0 + 1e-12;
 
+// Convert the base step to the current rescaled code-time convention.
 inline double inflation_rescaled_step(double astep_value) {
     return dt * std::pow(astep_value, rescale_s - 1.0);
 }
 
+// Allow adaptive growth while keeping an accepted step near the requested base step.
 inline double rk45_hmax_from_base_step(double base_step) {
-    return std::min(rk45_max_dt, std::max(rk45_min_dt, 2.0 * base_step));
+    return std::min(rk45_max_dt, std::max(rk45_min_dt, 2.0 * std::abs(base_step)));
 }
 
+// Shared accept/reject driver. step_function leaves the state unchanged after
+// rejection; failure_handler terminates or otherwise resolves a stalled step.
+struct RK45AcceptedStep {
+    double accepted;
+    double next;
+};
+
 template <typename StepFunction, typename FailureHandler>
-double rk45_accept_step(double h, double hmax, StepFunction&& step_function, FailureHandler&& failure_handler) {
+RK45AcceptedStep rk45_accept_step(
+    double h,
+    double hmax,
+    StepFunction&& step_function,
+    FailureHandler&& failure_handler)
+{
     // Generic adaptive-step accept/reject driver shared by inflation/deltaN/post-inflation.
     bool accepted = false;
     int attempts = 0;
+    double accepted_h = h;
     while (!accepted) {
+        accepted_h = h;
         double h_suggested = h;
         accepted = step_function(h, hmax, h_suggested);
         h = h_suggested;
         ++attempts;
 
-        if (!accepted && (attempts > RK45_MAX_ATTEMPTS || h <= rk45_min_dt * RK45_MIN_STEP_GUARD)) {
+        if (!accepted &&
+            (attempts > RK45_MAX_ATTEMPTS ||
+             std::abs(h) <= rk45_min_dt * RK45_MIN_STEP_GUARD)) {
             failure_handler(attempts, h);
         }
     }
-    return h;
+    return {accepted_h, h};
 }
 
+// Select the post-inflation RHS only within the lifetime of an RK loop scope.
 struct ScopedPostInflationRhsMode {
     explicit ScopedPostInflationRhsMode(bool enabled) {
         g_use_post_inflation_rhs = enabled;
@@ -370,6 +403,7 @@ struct ScopedPostInflationRhsMode {
     }
 };
 
+// Dormand-Prince 5(4) Butcher tableau and embedded-error coefficients.
 struct DormandPrince45Coefficients {
     static constexpr double a21 = 1.0 / 5.0;
     static constexpr double a31 = 3.0 / 40.0;
@@ -453,7 +487,7 @@ void compute_inflation_rhs(
         LOOP {
             const size_t id = idx(i, j, k);
             const double field_here = f_state[id];
-            const double lap_f = lapl<double>(i, j, k, f_state);
+            const double lap_f = spatial::laplacian(i, j, k, f_state);
             double pot_here = 0.0;
             double pot_deriv_here = 0.0;
 #if numerical_potential
@@ -491,17 +525,17 @@ void compute_inflation_rhs(
             dhdt[4][id] = hd_state[4][id];
             dhdt[5][id] = hd_state[5][id];
 
-            dhddt[0][id] = static_cast<float>(laplnorm * static_cast<double>(lapl<float>(i, j, k, h_state[0]))
+            dhddt[0][id] = static_cast<float>(laplnorm * static_cast<double>(spatial::laplacian(i, j, k, h_state[0]))
                         - friction * static_cast<double>(hd_state[0][id]) + srcAmp * T_xx);
-            dhddt[1][id] = static_cast<float>(laplnorm * static_cast<double>(lapl<float>(i, j, k, h_state[1]))
+            dhddt[1][id] = static_cast<float>(laplnorm * static_cast<double>(spatial::laplacian(i, j, k, h_state[1]))
                         - friction * static_cast<double>(hd_state[1][id]) + srcAmp * T_yy);
-            dhddt[2][id] = static_cast<float>(laplnorm * static_cast<double>(lapl<float>(i, j, k, h_state[2]))
+            dhddt[2][id] = static_cast<float>(laplnorm * static_cast<double>(spatial::laplacian(i, j, k, h_state[2]))
                         - friction * static_cast<double>(hd_state[2][id]) + srcAmp * T_zz);
-            dhddt[3][id] = static_cast<float>(laplnorm * static_cast<double>(lapl<float>(i, j, k, h_state[3]))
+            dhddt[3][id] = static_cast<float>(laplnorm * static_cast<double>(spatial::laplacian(i, j, k, h_state[3]))
                         - friction * static_cast<double>(hd_state[3][id]) + srcAmp * T_xy);
-            dhddt[4][id] = static_cast<float>(laplnorm * static_cast<double>(lapl<float>(i, j, k, h_state[4]))
+            dhddt[4][id] = static_cast<float>(laplnorm * static_cast<double>(spatial::laplacian(i, j, k, h_state[4]))
                         - friction * static_cast<double>(hd_state[4][id]) + srcAmp * T_xz);
-            dhddt[5][id] = static_cast<float>(laplnorm * static_cast<double>(lapl<float>(i, j, k, h_state[5]))
+            dhddt[5][id] = static_cast<float>(laplnorm * static_cast<double>(spatial::laplacian(i, j, k, h_state[5]))
                         - friction * static_cast<double>(hd_state[5][id]) + srcAmp * T_yz);
 #endif
         }
@@ -514,6 +548,20 @@ void compute_inflation_rhs(
         dadt = ad_state;
         daddt = std::pow(a_state, 3.0 - 2.0 * rescale_s) * source
             - (rescale_s + 1.0) * pw2(ad_state) / a_state;
+
+        if (linear_metric_perturbations) {
+            const LinearMetricCorrection metric_correction =
+                compute_linear_metric_correction(
+                    f_state, fd_state, a_state, ad_state, daddt);
+#if parallel_calculation
+#pragma omp parallel for
+#endif
+            for (long long raw_id = 0; raw_id < static_cast<long long>(f_state.size()); ++raw_id) {
+                const size_t id = static_cast<size_t>(raw_id);
+                dfddt[id] += metric_correction.rhs_coefficient
+                           * (f_state[id] - metric_correction.field_mean);
+            }
+        }
         return;
     }
 
@@ -525,7 +573,8 @@ void compute_inflation_rhs(
     const double Htilde = ad_state / a_state;
     const double invH   = 1.0 / Htilde;
     const double coeffU = 4.0 / (3.0 * (1.0 + omega));
-    const double srcAmp = 2.0 * std::pow(a_state, -2.0 * rescale_s);
+    const double srcAmp = POST_INFLATION_TENSOR_SOURCE_COEFFICIENT
+                        * std::pow(a_state, -2.0 * rescale_s);
 #endif
 
 #if parallel_calculation
@@ -533,7 +582,7 @@ void compute_inflation_rhs(
 #endif
     LOOP {
         const size_t id = idx(i, j, k);
-        const double lap_f = lapl<double>(i, j, k, f_state);
+        const double lap_f = spatial::laplacian(i, j, k, f_state);
 
         dfdt[id] = fd_state[id];
         dfddt[id] = omega * laplnorm * lap_f - scalar_friction * fd_state[id];
@@ -572,17 +621,17 @@ void compute_inflation_rhs(
         dhdt[4][id] = hd_state[4][id];
         dhdt[5][id] = hd_state[5][id];
 
-        dhddt[0][id] = static_cast<float>(laplnorm * static_cast<double>(lapl<float>(i, j, k, h_state[0]))
+        dhddt[0][id] = static_cast<float>(laplnorm * static_cast<double>(spatial::laplacian(i, j, k, h_state[0]))
                     - tensor_friction * static_cast<double>(hd_state[0][id]) + srcAmp * S_xx);
-        dhddt[1][id] = static_cast<float>(laplnorm * static_cast<double>(lapl<float>(i, j, k, h_state[1]))
+        dhddt[1][id] = static_cast<float>(laplnorm * static_cast<double>(spatial::laplacian(i, j, k, h_state[1]))
                     - tensor_friction * static_cast<double>(hd_state[1][id]) + srcAmp * S_yy);
-        dhddt[2][id] = static_cast<float>(laplnorm * static_cast<double>(lapl<float>(i, j, k, h_state[2]))
+        dhddt[2][id] = static_cast<float>(laplnorm * static_cast<double>(spatial::laplacian(i, j, k, h_state[2]))
                     - tensor_friction * static_cast<double>(hd_state[2][id]) + srcAmp * S_zz);
-        dhddt[3][id] = static_cast<float>(laplnorm * static_cast<double>(lapl<float>(i, j, k, h_state[3]))
+        dhddt[3][id] = static_cast<float>(laplnorm * static_cast<double>(spatial::laplacian(i, j, k, h_state[3]))
                     - tensor_friction * static_cast<double>(hd_state[3][id]) + srcAmp * S_xy);
-        dhddt[4][id] = static_cast<float>(laplnorm * static_cast<double>(lapl<float>(i, j, k, h_state[4]))
+        dhddt[4][id] = static_cast<float>(laplnorm * static_cast<double>(spatial::laplacian(i, j, k, h_state[4]))
                     - tensor_friction * static_cast<double>(hd_state[4][id]) + srcAmp * S_xz);
-        dhddt[5][id] = static_cast<float>(laplnorm * static_cast<double>(lapl<float>(i, j, k, h_state[5]))
+        dhddt[5][id] = static_cast<float>(laplnorm * static_cast<double>(spatial::laplacian(i, j, k, h_state[5]))
                     - tensor_friction * static_cast<double>(hd_state[5][id]) + srcAmp * S_yz);
 #endif
     }
@@ -636,6 +685,7 @@ static constexpr double DP_E[7] = {
     DormandPrince45Coefficients::e7
 };
 
+// Assemble the lattice fields for one explicit RK stage from prior stage slopes.
 template <int StageCount>
 void prepare_inflation_stage_state(double h, int stage, const double (&A)[StageCount][StageCount], InflationRKScratch& scratch, size_t gs) {
     for (size_t id = 0; id < gs; ++id) {
@@ -668,6 +718,7 @@ void prepare_inflation_stage_state(double h, int stage, const double (&A)[StageC
 #endif
 }
 
+// Assemble the scale factor and its derivative for one explicit RK stage.
 template <int StageCount>
 void prepare_inflation_background_state(
     double h,
@@ -687,6 +738,7 @@ void prepare_inflation_background_state(
     }
 }
 
+// Build and evaluate one complete inflationary RK stage.
 template <int StageCount>
 void evaluate_inflation_stage(
     double h,
@@ -712,6 +764,7 @@ void evaluate_inflation_stage(
 #endif
 }
 
+// Commit a weighted combination of RK slopes to every active state variable.
 template <int StageCount>
 void apply_inflation_weighted_update(
     double h,
@@ -757,8 +810,8 @@ void apply_inflation_weighted_update(
     t += h;
 }
 
+// Advance the coupled inflationary system by one fixed classical RK4 step.
 void rk4_step_inflation(double h, InflationRKScratch& scratch) {
-    // Classical RK4 single accepted step with fixed h.
     const size_t gs = f.size();
     scratch.ensure_size(gs);
 
@@ -778,9 +831,9 @@ void rk4_step_inflation(double h, InflationRKScratch& scratch) {
     apply_inflation_weighted_update(h, RK4_B, scratch, gs, ka, kad);
 }
 
+// Attempt one Dormand-Prince 5(4) step. Accepted candidates replace the global
+// state; rejected candidates leave it unchanged and return a smaller proposal.
 bool rk45_step_inflation(double h, double hmax, double& h_next, InflationRKScratch& scratch) {
-    // Dormand-Prince 5(4): computes candidate 5th-order state + embedded error estimate.
-    // On success: commits state and proposes next h. On failure: keeps state, shrinks h.
     const size_t gs = f.size();
     scratch.ensure_size(gs);
 
@@ -965,7 +1018,7 @@ void run_evolution_loop(FILE* output_) {
                 const double hmax = rk45_hmax_from_base_step(base_step);
                 h = clamp_rk45_step(h, hmax);
 
-                h = rk45_accept_step(
+                const RK45AcceptedStep accepted_step = rk45_accept_step(
                     h,
                     hmax,
                     [&](double h_trial, double h_limit, double& h_next) {
@@ -978,6 +1031,7 @@ void run_evolution_loop(FILE* output_) {
                         std::exit(1);
                     }
                 );
+                h = accepted_step.next;
 
                 numsteps++;
                 report_step(numsteps);
@@ -1000,7 +1054,58 @@ void run_evolution_loop(FILE* output_) {
 
 // -------------------- DeltaN Evolution --------------------
 
-// Update fd in e-folding time coordinates
+namespace {
+// Potential on the selected final hypersurface, used by the generic stopping criterion.
+double g_deltaN_phiref_potential = 0.0;
+
+bool deltaN_patch_is_active_with_potential(
+    double field_value, [[maybe_unused]] double potential_value)
+{
+    const bool forward = dN > 0.0;
+#if monotonic_potential
+    return forward
+        ? std::abs(field_value) > std::abs(phiref)
+        : std::abs(field_value) < std::abs(phiref);
+#elif antimonotonic_potential
+    return forward
+        ? std::abs(field_value) < std::abs(phiref)
+        : std::abs(field_value) > std::abs(phiref);
+#else
+    return forward
+        ? potential_value > g_deltaN_phiref_potential
+        : potential_value < g_deltaN_phiref_potential;
+#endif
+}
+
+bool deltaN_patch_is_beyond_reference(double field_value) {
+    const bool forward = dN > 0.0;
+#if monotonic_potential
+    return forward
+        ? std::abs(field_value) < std::abs(phiref)
+        : std::abs(field_value) > std::abs(phiref);
+#elif antimonotonic_potential
+    return forward
+        ? std::abs(field_value) > std::abs(phiref)
+        : std::abs(field_value) < std::abs(phiref);
+#else
+    const double potential_value = potential(field_value);
+    return forward
+        ? potential_value < g_deltaN_phiref_potential
+        : potential_value > g_deltaN_phiref_potential;
+#endif
+}
+} // namespace
+
+// Report whether a patch still has to reach the selected deltaN hypersurface.
+bool deltaN_patch_is_active(double field_value) {
+#if monotonic_potential || antimonotonic_potential
+    return deltaN_patch_is_active_with_potential(field_value, 0.0);
+#else
+    return deltaN_patch_is_active_with_potential(field_value, potential(field_value));
+#endif
+}
+
+// Apply one leapfrog kick to the separate-universe velocity in e-fold time.
 void evolve_derivsN(double d) {
     DECLARE_INDICES
 #if parallel_calculation
@@ -1011,7 +1116,8 @@ void evolve_derivsN(double d) {
     }
 }
 
-// Update f and deltaN grid
+// Drift active separate-universe patches and accumulate their local expansion.
+// Sites freeze after crossing the selected final hypersurface.
 void evolve_fieldsN(double d) {
     DECLARE_INDICES
     t += d;
@@ -1020,14 +1126,7 @@ void evolve_fieldsN(double d) {
 #pragma omp parallel for collapse(3)
 #endif
     LOOP {
-#if monotonic_potential
-        if (std::abs(f[idx(i,j,k)]) > std::abs(phiref))
-#elif antimonotonic_potential
-        if (std::abs(f[idx(i,j,k)]) < std::abs(phiref))
-#else
-        if (potential(f[idx(i,j,k)]) > potential(phiref))
-#endif
-        {
+        if (deltaN_patch_is_active(f[idx(i,j,k)])) {
             deltaN[idx(i,j,k)] += d;
             f[idx(i,j,k)] += d * fd[idx(i,j,k)];
         }
@@ -1037,6 +1136,7 @@ void evolve_fieldsN(double d) {
 }
 
 namespace {
+// Reusable RK stage storage for the separate-universe system.
 struct DeltaNRKScratch {
     std::vector<double> ftmp;
     std::vector<double> fdtmp;
@@ -1058,10 +1158,8 @@ struct DeltaNRKScratch {
     }
 };
 
-double g_deltaN_phiref_potential = 0.0;
-
-// deltaN RHS in e-folding-time coordinates.
-// Stopping criterion is encoded in ddNdt (active sites evolve N, inactive sites freeze N).
+// Evaluate the separate-universe RHS in e-fold-time coordinates. ddNdt is one
+// before a patch reaches the final hypersurface and zero after it freezes.
 void compute_deltaN_rhs(
     const std::vector<double>& f_state,
     const std::vector<double>& fd_state,
@@ -1089,14 +1187,7 @@ void compute_deltaN_rhs(
         evaluate_potential_from_value(field_here, 1, 1, nullptr, pot_here, pot_deriv_here);
 #endif
         const double pot_ratio_here = pot_deriv_here / pot_here;
-        bool is_active = false;
-#if monotonic_potential
-        is_active = std::abs(field_here) > std::abs(phiref);
-#elif antimonotonic_potential
-        is_active = std::abs(field_here) < std::abs(phiref);
-#else
-        is_active = pot_here > g_deltaN_phiref_potential;
-#endif
+        const bool is_active = deltaN_patch_is_active_with_potential(field_here, pot_here);
 
         dfddt[id] = -(3.0 - 0.5 * pw2(deriv_here)) * (deriv_here + pot_ratio_here);
 
@@ -1112,6 +1203,7 @@ void compute_deltaN_rhs(
     dadt = ad;
 }
 
+// Assemble the three per-site variables for one deltaN RK stage.
 template <int StageCount>
 void prepare_deltaN_stage_state(double h, int stage, const double (&A)[StageCount][StageCount], DeltaNRKScratch& scratch, size_t gs) {
     for (size_t id = 0; id < gs; ++id) {
@@ -1131,6 +1223,7 @@ void prepare_deltaN_stage_state(double h, int stage, const double (&A)[StageCoun
     }
 }
 
+// Build and evaluate one complete deltaN RK stage.
 template <int StageCount>
 void evaluate_deltaN_stage(
     double h,
@@ -1143,6 +1236,7 @@ void evaluate_deltaN_stage(
     compute_deltaN_rhs(scratch.ftmp, scratch.fdtmp, scratch.kf[stage], scratch.kfd[stage], scratch.kdn[stage], ka[stage]);
 }
 
+// Commit a weighted combination of deltaN RK slopes.
 template <int StageCount>
 void apply_deltaN_weighted_update(
     double h,
@@ -1173,8 +1267,8 @@ void apply_deltaN_weighted_update(
     t += h;
 }
 
+// Advance all separate-universe patches by one fixed classical RK4 step.
 void rk4_step_deltaN(double h, DeltaNRKScratch& scratch) {
-    // Classical RK4 single accepted step with fixed h.
     const size_t gs = f.size();
     scratch.ensure_size(gs);
 
@@ -1188,8 +1282,8 @@ void rk4_step_deltaN(double h, DeltaNRKScratch& scratch) {
     apply_deltaN_weighted_update(h, RK4_B, scratch, gs, ka);
 }
 
+// Attempt one adaptive Dormand-Prince step with the inflationary error policy.
 bool rk45_step_deltaN(double h, double hmax, double& h_next, DeltaNRKScratch& scratch) {
-    // Dormand-Prince 5(4) with the same error-controller policy as inflation RK45.
     const size_t gs = f.size();
     scratch.ensure_size(gs);
 
@@ -1267,7 +1361,8 @@ bool rk45_step_deltaN(double h, double hmax, double& h_next, DeltaNRKScratch& sc
 }
 } // namespace
 
-// Determine reference φ value for ending deltaN integration
+// Select the automatically determined field value defining the final deltaN slice.
+// The serial scan is intentional because tie-breaking must remain deterministic.
 double get_phiref() {
     DECLARE_INDICES
     double fref = f[idx(0,0,0)];
@@ -1287,9 +1382,8 @@ double get_phiref() {
     return fref;
 }
 
-// Run main deltaN integration loop
+// Run the complete separate-universe stage with the selected integrator.
 void run_deltaN_loop(FILE* output_) {
-    // Main deltaN driver with per-mode integrator dispatch.
     printf("Starting deltaN calculation\n");
     fprintf(output_, "Starting deltaN calculation\n");
 
@@ -1297,12 +1391,28 @@ void run_deltaN_loop(FILE* output_) {
     Ne = 0.0;
 
     initializeN();
-    if (deltaN_uses_staggered_derivatives()) {
-        evolve_fieldsN(0.5 * dN);
-    }
-
     phiref = use_phiref_manual ? phiref_manual_value : get_phiref();
     g_deltaN_phiref_potential = potential(phiref);
+
+    for (double field_value : f) {
+        if (deltaN_patch_is_beyond_reference(field_value)) {
+            std::fprintf(stderr,
+                "The selected phiref lies in the opposite direction from dN for part of the lattice.\n");
+            std::exit(1);
+        }
+    }
+
+    const double budget_tolerance =
+        32.0 * std::numeric_limits<double>::epsilon() * std::max(1.0, Nend);
+    const auto fixed_step_fits_budget = [&]() {
+        return std::abs(dN) <= Nend - std::abs(Ne) + budget_tolerance;
+    };
+
+    const bool deltaN_state_is_staggered =
+        deltaN_uses_staggered_derivatives() && fixed_step_fits_budget();
+    if (deltaN_state_is_staggered) {
+        evolve_fieldsN(0.5 * dN);
+    }
 
     DeltaNRKScratch rk_scratch;
 
@@ -1319,7 +1429,7 @@ void run_deltaN_loop(FILE* output_) {
 
     switch (deltaN_integrator) {
         case INTEGRATOR_LEAPFROG: {
-            while (Ne <= Nend) {
+            while (fixed_step_fits_budget()) {
                 evolve_derivsN(dN);
                 evolve_fieldsN(dN);
                 Ne += dN;
@@ -1329,7 +1439,7 @@ void run_deltaN_loop(FILE* output_) {
             break;
         }
         case INTEGRATOR_RK4: {
-            while (Ne <= Nend) {
+            while (fixed_step_fits_budget()) {
                 rk4_step_deltaN(dN, rk_scratch);
                 Ne += dN;
                 numsteps++;
@@ -1341,11 +1451,17 @@ void run_deltaN_loop(FILE* output_) {
         default: {
             double h = clamp_rk45_step(dN, rk45_max_dt);
 
-            while (Ne <= Nend) {
-                const double hmax = rk45_hmax_from_base_step(dN);
+            while (true) {
+                const double remaining_budget = Nend - std::abs(Ne);
+                if (remaining_budget <= budget_tolerance
+                    || remaining_budget < rk45_min_dt) break;
+
+                const double hmax = std::min(
+                    rk45_hmax_from_base_step(dN), remaining_budget);
+                h = std::copysign(std::min(std::abs(h), hmax), dN);
                 h = clamp_rk45_step(h, hmax);
 
-                h = rk45_accept_step(
+                const RK45AcceptedStep accepted_step = rk45_accept_step(
                     h,
                     hmax,
                     [&](double h_trial, double h_limit, double& h_next) {
@@ -1359,7 +1475,8 @@ void run_deltaN_loop(FILE* output_) {
                     }
                 );
 
-                Ne += h;
+                Ne += accepted_step.accepted;
+                h = accepted_step.next;
                 numsteps++;
                 report_step(numsteps);
             }
@@ -1367,36 +1484,38 @@ void run_deltaN_loop(FILE* output_) {
         }
     }
 
-    saveN();
-    fflush(output_);
-    if (deltaN_uses_staggered_derivatives()) {
+    if (deltaN_state_is_staggered) {
         evolve_fieldsN(-0.5 * dN);
     }
+    saveN(output_);
+    fflush(output_);
 }
 #endif
 
 #if post_inflation
 // -------------------- Post-inflation Evolution --------------------
 
-// ===== derivative pack (uses existing dfdx, idx, INCREMENT/DECREMENT, N, dx) =====
+// Derivatives reused by all post-inflationary scalar source components.
 struct DerivPack {
     double gf[3], gfd[3];  // ∂_i f, ∂_i fd
-    double Hf[6];          // Hessian(f): [xx, yy, zz, xy, xz, yz] in your sym_idx order
+    double Hf[6];          // Hessian(f): [xx, yy, zz, xy, xz, yz]
     double f_here;
 } ;
 
-// second derivatives on a double field
+// Same-axis second derivative wrapper for the active post-inflationary field.
 inline double d2_same(int dim, int i, int j, int k, const std::vector<double>& A) {
     const size_t id = idx(i, j, k);
     return d2_same_state(dim, i, j, k, id, A);
 }
 
+// Mixed second derivative wrapper for the active post-inflationary field.
 inline double d2_cross(int d1, int d2, int i, int j, int k, const std::vector<double>& A) {
     return d2_cross_state(d1, d2, i, j, k, A);
 }
 
+// Cache the gradient and Hessian entries reused by the tensor-source terms.
 inline void build_deriv_pack(int i, int j, int k, DerivPack& P) {
-    // first derivatives
+    // First derivatives.
     P.gf[0]  = dfdx<double>(0,i,j,k,f);
     P.gf[1]  = dfdx<double>(1,i,j,k,f);
     P.gf[2]  = dfdx<double>(2,i,j,k,f);
@@ -1404,7 +1523,7 @@ inline void build_deriv_pack(int i, int j, int k, DerivPack& P) {
     P.gfd[1] = dfdx<double>(1,i,j,k,fd);
     P.gfd[2] = dfdx<double>(2,i,j,k,fd);
 
-    // Hessian entries in your sym_idx packing
+    // Hessian entries in sym_idx packing.
     P.Hf[sym_idx(0,0)] = d2_same(0,i,j,k,f);   // xx
     P.Hf[sym_idx(1,1)] = d2_same(1,i,j,k,f);   // yy
     P.Hf[sym_idx(2,2)] = d2_same(2,i,j,k,f);   // zz
@@ -1416,24 +1535,8 @@ inline void build_deriv_pack(int i, int j, int k, DerivPack& P) {
 }
 
 
-// ===== fast source using sym_idx() and comp_to_indices() =====
-inline double stress_energy_post_inflation_fast(int l, int m, const DerivPack& P) {
-    const double Htilde = ad / a;             // \tilde{\mathcal H}
-    const double invH   = 1.0 / Htilde;
-    const double coeffU = 4.0 / (3.0 * (1.0 + omega));
-
-    const double dPhi_l   = P.gf[l];
-    const double dPhi_m   = P.gf[m];
-    const double d2Phi_lm = P.Hf[sym_idx(l,m)];
-    const double dU_l     = P.gfd[l] * invH + dPhi_l;
-    const double dU_m     = P.gfd[m] * invH + dPhi_m;
-
-    return 4.0 * P.f_here * d2Phi_lm
-    + 2.0 * dPhi_l * dPhi_m
-    - coeffU * (dU_l * dU_m);
-}
-
-// Leapfrog update of field derivatives
+// Apply one leapfrog kick to the post-inflationary scalar, background, and
+// optional tensor fields.
 void evolve_derivs_post_inflation(double d) {
     DECLARE_INDICES
 
@@ -1450,7 +1553,7 @@ void evolve_derivs_post_inflation(double d) {
 #endif
     LOOP {
         fd[idx(i,j,k)] += d * (
-        omega * laplnorm * lapl<double>(i, j, k, f)
+        omega * laplnorm * spatial::laplacian(i, j, k, f)
         - (3.0 * (1.0 + omega) + rescale_s) * ad * fd[idx(i,j,k)] / a
         );
     }
@@ -1462,7 +1565,8 @@ void evolve_derivs_post_inflation(double d) {
     const double coeffU = 4.0 / (3.0 * (1.0 + omega));
 
     // Source prefactor in the tensor equation normalization used by this code.
-    const double srcAmp = 2.0 * std::pow(a, -2.0 * rescale_s);
+    const double srcAmp = POST_INFLATION_TENSOR_SOURCE_COEFFICIENT
+                        * std::pow(a, -2.0 * rescale_s);
 
 #if parallel_calculation
 #pragma omp parallel for collapse(3)
@@ -1472,11 +1576,11 @@ void evolve_derivs_post_inflation(double d) {
     for (int k=0; k<N; ++k) {
         const size_t id = idx(i,j,k);
 
-        // build derivatives once per site
+        // Build derivatives once per site and reuse them for all components.
         DerivPack P;
         build_deriv_pack(i,j,k,P);
 
-        // bare sources (not TT-projected), explicit pairs
+        // Construct the unprojected real-space sources.
         const double Phi = P.f_here;
 
         const double gx = P.gf[0];
@@ -1502,9 +1606,9 @@ void evolve_derivs_post_inflation(double d) {
         const double S_xz = 4.0 * Phi * Hxz + 2.0 * gx * gz - coeffU * (dux * duz);
         const double S_yz = 4.0 * Phi * Hyz + 2.0 * gy * gz - coeffU * (duy * duz);
 
-        // ---- explicit 6 component updates ----
+        // Update the six stored components of the symmetric tensor.
         {
-            const double lap_h = static_cast<double>(lapl<float>(i, j, k, hij[0]));
+            const double lap_h = static_cast<double>(spatial::laplacian(i, j, k, hij[0]));
             const double rhs = d * (
             laplnorm * lap_h
             - (2.0 + rescale_s) * ad * static_cast<double>(hijd[0][id]) / a
@@ -1513,7 +1617,7 @@ void evolve_derivs_post_inflation(double d) {
             hijd[0][id] += static_cast<float>(rhs);
         }
         {
-            const double lap_h = static_cast<double>(lapl<float>(i, j, k, hij[1]));
+            const double lap_h = static_cast<double>(spatial::laplacian(i, j, k, hij[1]));
             const double rhs = d * (
             laplnorm * lap_h
             - (2.0 + rescale_s) * ad * static_cast<double>(hijd[1][id]) / a
@@ -1522,7 +1626,7 @@ void evolve_derivs_post_inflation(double d) {
             hijd[1][id] += static_cast<float>(rhs);
         }
         {
-            const double lap_h = static_cast<double>(lapl<float>(i, j, k, hij[2]));
+            const double lap_h = static_cast<double>(spatial::laplacian(i, j, k, hij[2]));
             const double rhs = d * (
             laplnorm * lap_h
             - (2.0 + rescale_s) * ad * static_cast<double>(hijd[2][id]) / a
@@ -1531,7 +1635,7 @@ void evolve_derivs_post_inflation(double d) {
             hijd[2][id] += static_cast<float>(rhs);
         }
         {
-            const double lap_h = static_cast<double>(lapl<float>(i, j, k, hij[3]));
+            const double lap_h = static_cast<double>(spatial::laplacian(i, j, k, hij[3]));
             const double rhs = d * (
             laplnorm * lap_h
             - (2.0 + rescale_s) * ad * static_cast<double>(hijd[3][id]) / a
@@ -1540,7 +1644,7 @@ void evolve_derivs_post_inflation(double d) {
             hijd[3][id] += static_cast<float>(rhs);
         }
         {
-            const double lap_h = static_cast<double>(lapl<float>(i, j, k, hij[4]));
+            const double lap_h = static_cast<double>(spatial::laplacian(i, j, k, hij[4]));
             const double rhs = d * (
             laplnorm * lap_h
             - (2.0 + rescale_s) * ad * static_cast<double>(hijd[4][id]) / a
@@ -1549,7 +1653,7 @@ void evolve_derivs_post_inflation(double d) {
             hijd[4][id] += static_cast<float>(rhs);
         }
         {
-            const double lap_h = static_cast<double>(lapl<float>(i, j, k, hij[5]));
+            const double lap_h = static_cast<double>(spatial::laplacian(i, j, k, hij[5]));
             const double rhs = d * (
             laplnorm * lap_h
             - (2.0 + rescale_s) * ad * static_cast<double>(hijd[5][id]) / a
@@ -1565,9 +1669,9 @@ void evolve_derivs_post_inflation(double d) {
 
 // -------------------- Main Post-Inflation Evolution Loop --------------------
 
+// Run the complete post-inflationary stage. RK modes reuse the inflationary
+// stage machinery while ScopedPostInflationRhsMode selects the appropriate RHS.
 void run_post_inflation_loop(FILE* output_) {
-    // Main post-inflation driver:
-    // reuses inflation RK machinery while switching RHS via ScopedPostInflationRhsMode.
     initialize_post_inflation();
 
     int numsteps = 0;
@@ -1622,7 +1726,7 @@ void run_post_inflation_loop(FILE* output_) {
                 const double hmax = rk45_hmax_from_base_step(dt_post_inflation);
                 h = clamp_rk45_step(h, hmax);
 
-                h = rk45_accept_step(
+                const RK45AcceptedStep accepted_step = rk45_accept_step(
                     h,
                     hmax,
                     [&](double h_trial, double h_limit, double& h_next) {
@@ -1635,6 +1739,7 @@ void run_post_inflation_loop(FILE* output_) {
                         std::exit(1);
                     }
                 );
+                h = accepted_step.next;
 
                 numsteps++;
                 report_step(numsteps);

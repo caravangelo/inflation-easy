@@ -3,9 +3,9 @@
 
 ![](https://github.com/user-attachments/assets/7af3e20c-ec15-4f93-8764-85e422bbe8d7)
 
-**InflationEasy** is the first lattice simulation specifically developed for cosmological inflation. It simulates single-field inflation on a 3D lattice in an expanding FLRW universe and is written in C++.  The code is inspired by and partially adapted from [LATTICEEASY](http://www.felderbooks.com/latticeeasy/) by Gary Felder and Igor Tkachev.
+**InflationEasy** is a lattice code specifically developed for cosmological inflation. It simulates the nonlinear dynamics of a scalar field on a three-dimensional lattice in an expanding FLRW universe using finite-difference spatial derivatives. Building on the well-known [LATTICEEASY](http://www.felderbooks.com/latticeeasy/) by Gary Felder and Igor Tkachev, the code incorporates several features tailored to inflationary applications, including a nonperturbative $\delta N$ calculation of the curvature perturbation $\zeta$, optional linear scalar metric corrections, and the calculation of scalar-induced gravitational waves generated during inflation and at subsequent horizon re-entry.
 
-More information is available in the associated publication: [arXiv:2506.11797](https://arxiv.org/abs/2506.11797). **Note:** The code is still under development, and the paper has not yet been published in a journal. Some information in the preprint may therefore differ from this documentation; in case of discrepancies, this documentation takes precedence.
+More information is available in the associated publication: [arXiv:2506.11797](https://arxiv.org/abs/2506.11797). **Note:** The associated paper is currently under review. Version 1.1.0 includes features introduced after the current arXiv version, such as selectable higher-order spatial stencils and optional linear metric corrections. In case of discrepancies with the arXiv version, this documentation takes precedence.
 
 ## Key Features
 
@@ -13,6 +13,8 @@ More information is available in the associated publication: [arXiv:2506.11797](
 - **Flexible Potential Handling:** Supports both analytical and numerical representations of the inflationary potential.  
   **Note:** The code typically runs faster when using an analytical potential.
 - **Gravitational-Waves:** Can compute the scalar-induced gravitational-wave background sourced during inflation and after inflation at horizon re-entry.
+- **Linear Metric Corrections:** Optionally includes the leading linear scalar metric correction to the inflaton equation of motion.
+- **Selectable Spatial Accuracy:** Supports spatial stencils up to sixth order, with consistent discretization corrections in the initialization and outputs.
 - **OpenMP Parallelization:** Optionally leverages OpenMP for accelerated computation on multi-core systems.
 - **Comprehensive Output:** Produces detailed outputs including field statistics, background quantities, and power spectra.
 
@@ -27,39 +29,14 @@ Use `notebooks/quickstart.ipynb` for a guided, self-running workflow that:
 
 This is the recommended first entry point for new users.
 
-## Code Structure
-
-### Source files (`src/`)
-- `main.cpp`: Entry point of the program; orchestrates the simulation workflow.
-- `initialize.cpp`: Sets initial field conditions and computes the initial Hubble parameter.
-- `evolution.cpp`: Implements the core algorithm for time evolution of the scalar field.
-- `output.cpp`: Handles writing results to disk, including observables and diagnostics.
-- `potential.cpp`: Defines the inflationary potential, either analytically or via input files.
-- `parameters.h`: Compile-time configuration (feature toggles and lattice size).  
-  **Important:** Edit this file only for settings that require recompilation.
-- `runtime_parameters.cpp`: Run-time defaults and parser for `params.txt` overrides.
-
-### Input files (`inputs/`)
-These files are only required when using a **numerical potential** (`numerical_potential = 1` in `parameters.h`):
-
-- `field_values.dat`: Field values at which the potential is defined.
-- `potential.dat`: Corresponding potential values.
-- `potential_derivative.dat`: First derivative of the potential.
-
-Each file should contain a single column of values, one per line. Analytical potentials do not require any input files.
-
-### Output files (`results/`)
-- Simulation results, logs, spectra, and other diagnostics are written here.
-
-### Notebook (`notebooks/`)
-- `quickstart.ipynb`: Guided end-to-end run notebook (recommended first notebook).
-- `plot.ipynb`: Post-processing and visualization notebook for simulation outputs.
+The notebooks are optional. The numerical evolution is performed entirely by the C++ executable, which can be configured, compiled, and run directly from the command line.
 
 ## Prerequisites
 
 - A C++17-compliant compiler (e.g., GCC or Clang).
 - (Optional) OpenMP for parallel execution.
-- (Optional) Python 3 and Jupyter for running the notebook.
+- (Optional) Python 3 for the automated test targets and notebook post-processing; it is not required to build or run the C++ simulation itself.
+- (Optional) Jupyter for running the notebooks interactively.
 
 ## Building the Code
 
@@ -67,14 +44,6 @@ To compile the program, simply run:
 
 ```bash
 make
-```
-
-### Verifying the Build
-
-Run this command to ensure the code compiles cleanly from source:
-
-```bash
-make clean && make
 ```
 
 ### Optional Performance Flags
@@ -119,14 +88,15 @@ To keep run-time values consistent with the selected potential mode, use the mat
 
 ### Configuration Model
 
-InflationEasy now supports two classes of parameters:
+InflationEasy supports two classes of parameters:
 
-- Compile-time parameters (`src/parameters.h`): feature toggles and lattice layout (`N`).
-- Run-time parameters (`params.txt`): physical values, time steps, output options, and most scan parameters.
+- Compile-time parameters (`src/parameters.h`): potential representation (numerical vs. analytical), optional-module switches, the number of lattice points per spatial direction (`N`), and spatial stencil order.
+- Run-time parameters (`params.txt`): potential parameters, time steps, output options, and most scan parameters.
 
 A ready-to-use `params.txt` is included at the repository root.
 In the current repository state, `params.txt` matches **Example A (Numerical)**.
 You can edit it directly; values there override the defaults compiled into the executable.
+Invalid values that would make an integration or output operation undefined are reported before the lattice is initialized.
 Two preset profiles are also included for convenience:
 
 ```bash
@@ -137,25 +107,56 @@ cp params.numerical.txt params.txt
 cp params.analytic.txt params.txt
 ```
 
+The spatial discretization is selected in `src/parameters.h`:
+
+```cpp
+#define SPATIAL_STENCIL_ORDER 2
+```
+
+Choose `2` (default), `4`, or `6`, then recompile. The selected order is used consistently for the scalar and tensor Laplacians, the directional derivatives entering the GW sector, vacuum initialization, effective-momentum output and binning, and the Fourier-space TT projector. Higher orders use wider stencils and a correspondingly stricter stability limit; initialization checks `dt/dx` against the selected limit.
+
 ### Essential Runtime Parameters (Quick Guide)
 
-The most commonly adjusted run-time keys in `params.txt` are:
+The most commonly adjusted run-time keys in `params.txt` are summarized below.
 
-- `dt`: base inflation time step.
-- `af`: end scale factor for the main inflation loop. If omitted, defaults to `2*N`.
-- `dN`, `Nend`: deltaN loop step/end controls.
-- `dt_post_inflation`, `af_post_inflation`: post-inflation step/end controls (`af_post_inflation` also defaults to `2*N` if omitted).
-- `inflation_integrator`, `deltaN_integrator`, `post_inflation_integrator`: choose `leapfrog`, `rk4`, or `rk45` per loop (all default to `leapfrog` if omitted).
-- `rk45_abs_tol`, `rk45_rel_tol`, `rk45_min_dt`, `rk45_max_dt`, `rk45_safety`: only relevant for loops using `rk45`.
+#### Inflationary Initialization and Evolution
 
-Important: `monotonic_potential` / `antimonotonic_potential` select the compile-time deltaN stopping potential criterion in `src/parameters.h`; they are not `params.txt` keys. The implemented criteria are: monotonic -> evolve while `|phi| > |phi_ref|`, anti-monotonic -> evolve while `|phi| < |phi_ref|`, and if both are `0`, generic potential fallback -> evolve while `V(phi) > V(phi_ref)`.
+- `initial_field`: homogeneous initial value of the inflaton, in code units.
+- `initial_derivative`: homogeneous initial inflaton velocity, in code units.
+- `dt`: inflationary time step.
+- `af`: final scale factor for the inflationary evolution. If omitted, it defaults to `2*N`.
+- `initial_mass_squared`: optional mass-squared contribution to the initial inflaton mode frequency, in the same internal code units as $k_{\rm eff}^2$. If omitted, the initializer uses $\omega_k^2=k_{\rm eff}^2$; if supplied, it uses $\omega_k^2=k_{\rm eff}^2+m_{\rm init}^2$, with `initial_mass_squared` providing $m_{\rm init}^2$.
+- `linear_metric_perturbations`: set to `1` to add the leading linear scalar metric correction during the inflationary evolution. It defaults to `0` and, as a run-time option, does not require recompilation.
+- `output_bispectrum`: set to `1` to compute the equilateral scalar-field bispectrum at the final inflationary time. The resulting `bispectra.dat` file contains only equilateral configurations and does not contain general triangle configurations. This calculation is computationally expensive for large lattices and is disabled by default.
+
+#### $\delta N$ Stage
+
+These parameters are used when `perform_deltaN=1`:
+
+- `dN`, `Nend`: integration step and maximum integration magnitude. `dN` must be nonzero; a negative value integrates backward and requires `use_phiref_manual=1`, while `Nend` remains nonnegative.
+
+Important: `monotonic_potential` / `antimonotonic_potential` select the compile-time deltaN stopping potential criterion in `src/parameters.h`; they are not `params.txt` keys. For forward integration, the implemented criteria are: monotonic -> evolve while `|phi| > |phi_ref|`, anti-monotonic -> evolve while `|phi| < |phi_ref|`, and if both are `0`, generic potential fallback -> evolve while `V(phi) > V(phi_ref)`.
+
+If `Nend` is reached before every patch crosses the selected surface, the code records a warning in both the terminal and `results/output.txt`. The deltaN histogram then uses only completed patches, while incomplete sites are set to zero in spatial and spectral products. The post-inflationary stage requires every patch to complete and stops with an error otherwise.
+
+#### Post-inflationary Stage
+
+These parameters are used when `post_inflation=1`:
+
+- `dt_post_inflation`, `af_post_inflation`: time step and final scale factor (`af_post_inflation` defaults to `2*N` if omitted).
+- `omega`: constant equation-of-state parameter $w$.
+
+#### Integrator Selection
+
+- `inflation_integrator`, `deltaN_integrator`, `post_inflation_integrator`: choose `leapfrog`, `rk4`, or `rk45` for the corresponding stage (each defaults to `leapfrog` if omitted).
+- `rk45_abs_tol`, `rk45_rel_tol`, `rk45_min_dt`, `rk45_max_dt`, `rk45_safety`: used only by stages whose integrator is set to `rk45`.
 
 ### Custom Potentials
 
 To define a custom potential:
 
 - For an analytical potential, modify the relevant functions in `potential.cpp`.
-- For a numerical potential, place `field_values.dat`, `potential.dat`, and `potential_derivative.dat` in the `inputs/` directory. These must be one-value-per-line.
+- For a numerical potential, place `field_values.dat`, `potential.dat`, and `potential_derivative.dat` in the `inputs/` directory. These must be finite one-value-per-line tables of equal length, with a strictly descending field grid.
 - Adjust physical and numerical run parameters in `params.txt` (or in defaults inside `runtime_parameters.cpp`).
 
 ### Running the Code
@@ -168,7 +169,47 @@ After compilation, run the simulation via:
 
 Output will appear in the `results/` directory. A runtime log is saved in `results/output.txt`, along with energy densities, field values, spectra, and more.
 
-All quantities are given in **reduced Planck units**, where $M_{\mathrm{Pl}}^{\text{red}} = \frac{M_{\mathrm{Pl}}}{\sqrt{8\pi}} = 1$. This sets $\hbar = c = 1$ and $8\pi G = 1$, simplifying the equations.
+Histogram files store normalized probabilities per bin. The example notebooks use the bin metadata in the corresponding `histogramtimes*.dat` files to construct bin centers and divide by the bin width when plotting probability densities.
+
+The documentation and outputs use natural units, $\hbar=c=1$, and dimensionful quantities are expressed in units of the reduced Planck mass $M_{\rm Pl}\equiv(8\pi G)^{-1/2}$. Thus $M_{\rm Pl}=1$ and $8\pi G=1$.
+
+## Code Structure
+
+### Source files (`src/`)
+- `main.cpp`: Entry point of the program; orchestrates the simulation workflow.
+- `main.h`: Declares the shared simulation state and core functions.
+- `initialize.cpp`: Prepares the scalar, expansion, and optional tensor initial conditions.
+- `evolution.cpp`: Implements the inflation, deltaN, and post-inflation evolution stages.
+- `spatial_discretization.h`: Defines the selectable spatial operators and their Fourier-space effective momenta.
+- `linear_metric.cpp` / `linear_metric.h`: Implement the optional linear scalar metric correction.
+- `ffteasy.hpp`: Provides the FFT routines inherited from LATTICEEASY.
+- `output.cpp`: Handles writing results to disk, including observables and diagnostics.
+- `potential.cpp`: Defines the inflationary potential, either analytically or via input files.
+- `parameters.h`: Compile-time configuration for the potential representation (numerical vs. analytical), optional modules, number of lattice points per spatial direction, and spatial stencil order.
+  **Important:** Edit this file only for settings that require recompilation.
+- `runtime_parameters.cpp`: Run-time defaults and parser for `params.txt` overrides.
+
+### Input files (`inputs/`)
+These files are only required when using a **numerical potential** (`numerical_potential = 1` in `parameters.h`):
+
+- `field_values.dat`: Field values at which the potential is defined.
+- `potential.dat`: Corresponding potential values.
+- `potential_derivative.dat`: First derivative of the potential.
+
+Each file should contain a single column of finite values, one per line. The three tables must have the same length, contain at least two entries, and use a strictly descending field grid. The executable reports malformed or inconsistent tables before starting the simulation. Analytical potentials do not require any input files.
+
+### Output files (`results/`)
+- Simulation results, logs, spectra, and other diagnostics are written here.
+
+### Notebooks (`notebooks/`)
+- `quickstart.ipynb`: Guided end-to-end run notebook (recommended first notebook).
+- `plot.ipynb`: Post-processing and visualization notebook for simulation outputs.
+
+### Tests (`tests/`)
+- `spatial_discretization_test.cpp`: Checks each spatial stencil against its Fourier eigenvalue.
+- `release_smoke.py`: Runs the clean-tree smoke, sanitizer, and pre-release configuration matrices.
+
+Users extending the C++ implementation should read [`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md), which documents the relationships that must remain consistent among potentials, spatial stencils, integrators, optional modules, and outputs.
 
 ## Reproducibility Notes
 
@@ -181,7 +222,9 @@ All quantities are given in **reduced Planck units**, where $M_{\mathrm{Pl}}^{\t
   - whether OpenMP was enabled
 - Main run metadata is written by the code to `results/info.dat`.
 
-## Developer Notes (Numerics Contract)
+## Developer Notes
+
+The complete module map and modification checklist are provided in [`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md).
 
 If you modify `src/evolution.cpp`, keep these invariants unchanged unless you intentionally redesign the algorithm:
 
@@ -190,17 +233,26 @@ If you modify `src/evolution.cpp`, keep these invariants unchanged unless you in
 - RK45 acceptance logic based on weighted RMS error with `rk45_abs_tol`/`rk45_rel_tol`.
 - Existing output schema (`results/*.dat` and `results/post_inflation/*.dat`) used by analysis scripts.
 
-### Regression Check (main vs current branch)
+### Automated Tests
 
-Use the included regression to compare against `main` at `N=16`:
+Run the fast spatial-operator and simulation smoke tests with:
 
 ```bash
-python3 tests/regression_main_n16.py --repo . --main-ref main --params params.numerical.txt --integrators leapfrog,rk4,rk45
+make test
 ```
 
-This checks representative outputs for all requested integrators and reports mismatches with max absolute/relative differences.
+Before preparing a release, run the focused memory checks and the broader
+integrator, stencil, and optional-feature matrix:
 
-## Jupyter Notebook
+```bash
+make test-sanitizers
+make test-release
+```
+
+`make test-spatial` remains available when only the second-, fourth-, and
+sixth-order spatial operators and their Fourier eigenvalues need to be checked.
+
+## Jupyter Notebooks
 
 Two notebooks are included:
 

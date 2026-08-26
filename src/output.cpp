@@ -2,16 +2,24 @@
 //
 // This file implements simulation I/O: parameter dumps, spectra, energy diagnostics,
 // and field snapshots written to the results/ directory.
+//
+// Output routines intentionally preserve the plain-text schema documented in the
+// manuscript and consumed by notebooks/plot.ipynb. Several FFT-based routines
+// transform global arrays in place and restore them before returning; callers must
+// not interleave those routines with time evolution.
 
 #include <filesystem>
 #include <cfloat>   // DBL_MAX, FLT_MAX
+#include <limits>
 using namespace std::filesystem;
 
 #include "main.h"
 #include "ffteasy.hpp"
 
-char name_[550]; // Filenames - set differently by each function to open output files
+// Shared filename buffer used only while opening persistent output streams.
+char name_[550];
 
+// Open an output file or terminate immediately with a path-specific error.
 static FILE* open_output_or_die(const char* path, const char* mode) {
     FILE* fp = std::fopen(path, mode);
     if (!fp) {
@@ -21,7 +29,13 @@ static FILE* open_output_or_die(const char* path, const char* mode) {
     return fp;
 }
 
-// Zeroes out a mode and its derivative (used when applying a cutoff)
+// Preserve the established slice for production grids while remaining valid
+// for the very small lattices used in tests and exploratory runs.
+static constexpr int snapshot_slice_index() {
+    return N < 64 ? (N > 5 ? 5 : N - 1) : 50;
+}
+
+// Zero one packed complex mode and its derivative when applying a hard cutoff.
 void kill_mode(double *field, double *deriv)
 {
     field[0] = 0.;
@@ -29,6 +43,45 @@ void kill_mode(double *field, double *deriv)
     deriv[0] = 0.;
     deriv[1] = 0.;
     return;
+}
+
+// Average the selected Laplacian's effective momentum over the same DFT shells
+// and multiplicities used by all isotropic spectra.
+static const std::vector<double>& effective_k_bin_centers()
+{
+    static std::vector<double> centers;
+    if (!centers.empty()) return centers;
+
+    const int numbins = static_cast<int>(std::sqrt(3.0) * (N / 2)) + 1;
+    std::vector<int> counts(numbins, 0);
+    std::vector<double> sums(numbins, 0.0);
+
+    for (int i = 0; i < N; ++i) {
+        const int px = spatial::signed_mode(i);
+        for (int j = 0; j < N; ++j) {
+            const int py = spatial::signed_mode(j);
+            for (int k = 1; k < N / 2; ++k) {
+                const int bin = spatial::shell_index(px, py, k);
+                if (bin >= numbins) continue;
+                const double keff = std::sqrt(spatial::effective_momentum_squared(px, py, k, dx));
+                counts[bin] += 2;
+                sums[bin] += 2.0 * keff;
+            }
+            for (int k = 0; k <= N / 2; k += N / 2) {
+                const int bin = spatial::shell_index(px, py, k);
+                if (bin >= numbins) continue;
+                const double keff = std::sqrt(spatial::effective_momentum_squared(px, py, k, dx));
+                counts[bin] += 1;
+                sums[bin] += keff;
+            }
+        }
+    }
+
+    centers.resize(numbins, 0.0);
+    for (int bin = 0; bin < numbins; ++bin) {
+        if (counts[bin] > 0) centers[bin] = rescale_B * sums[bin] / counts[bin];
+    }
+    return centers;
 }
 
 // -----------------------------------------------------------------------------
@@ -66,39 +119,26 @@ static void write_isotropic_spectrum_from_fft_r2c(
     const double (*nyquist_plane)[2 * N],
     const double norm1)
 {
-    const int maxnumbins = (int)(1.73205 * (N / 2)) + 1;
-    const int numbins = maxnumbins;
-
-    int numpoints[maxnumbins];
-    double p[maxnumbins], f2[maxnumbins];
-
-    const double dp = 2.0 * pi / L;
-
-    for (int i = 0; i < numbins; i++)
-    {
-        p[i] = dp * i;
-        numpoints[i] = 0;
-        f2[i] = 0.0;
-    }
+    const std::vector<double>& momenta = effective_k_bin_centers();
+    const int numbins = static_cast<int>(momenta.size());
+    std::vector<int> numpoints(numbins, 0);
+    std::vector<double> f2(numbins, 0.0);
 
     // Match legacy binning + multiplicities + indexing exactly.
     for (int i = 0; i < N; i++)
     {
-        const int px = (i <= N / 2 ? i : i - N);
+        const int px = spatial::signed_mode(i);
 
         for (int j = 0; j < N; j++)
         {
-            const int py = (j <= N / 2 ? j : j - N);
+            const int py = spatial::signed_mode(j);
 
             // Interior modes: 1 <= k < N/2 carry a conjugate partner -> weight 2
             for (int k = 1; k < N / 2; k++)
             {
                 const int pz = k;
 
-                const double pmagnitude =
-                    std::sqrt(pw2((double)px) + pw2((double)py) + pw2((double)pz));
-
-                const int bin = (int)lround(pmagnitude);
+                const int bin = spatial::shell_index(px, py, pz);
                 if (bin < 0 || bin >= numbins) continue;
 
                 const double re = field_fft[idx(i, j, 2 * k)];
@@ -114,10 +154,7 @@ static void write_isotropic_spectrum_from_fft_r2c(
             {
                 const int pz = k;
 
-                const double pmagnitude =
-                    std::sqrt(pw2((double)px) + pw2((double)py) + pw2((double)pz));
-
-                const int bin = (int)lround(pmagnitude);
+                const int bin = spatial::shell_index(px, py, pz);
                 if (bin < 0 || bin >= numbins) continue;
 
                 double fp2 = 0.0;
@@ -143,7 +180,7 @@ static void write_isotropic_spectrum_from_fft_r2c(
     for (int i = 0; i < numbins; i++)
     {
         if (numpoints[i] > 0) f2[i] /= (double)numpoints[i];
-        std::fprintf(out, "%e %d %e\n", p[i], numpoints[i], norm1 * f2[i]);
+        std::fprintf(out, "%e %d %e\n", momenta[i], numpoints[i], norm1 * f2[i]);
     }
 
     std::fprintf(out, "\n");
@@ -200,7 +237,7 @@ static void build_deltaN_log()
 
 
 
-// Computes spatial averages and variances of the field and its derivative
+// Write the scalar mean, variance, and mean physical-time velocity.
 void meansvars(int flush)
 {
     static FILE *means_, *vars_, *velocity_;
@@ -236,16 +273,21 @@ void meansvars(int flush)
     {
         av  += f[idx(i,j,k)];
         vel += fd[idx(i,j,k)];
-        var += pw2(f[idx(i,j,k)]);
     }
-    av  = av  / static_cast<double>(gridsize); // Convert sum to average
-    vel = vel / static_cast<double>(gridsize);
+    const double inv_gridsize = 1.0 / static_cast<double>(gridsize);
+    av  *= inv_gridsize;
+    vel *= inv_gridsize;
+
+    // Evaluate <(phi - <phi>)^2> directly to avoid cancellation when the
+    // homogeneous field is much larger than its fluctuations.
+    LOOP var += pw2(f[idx(i,j,k)] - av);
+    var *= inv_gridsize;
 
     vel = vel * std::pow(a, rescale_s - 1.0) * rescale_B;
 
     fprintf(means_,    " %e", av);
     fprintf(velocity_, " %e", vel);
-    fprintf(vars_,     " %e", var - pw2(av));
+    fprintf(vars_,     " %e", var);
 
     // Check for instability. See if the field has grown exponentially and become non-numerical at any point.
     if (av + DBL_MAX == av || (av != 0. && av / av != 1.))
@@ -268,7 +310,7 @@ void meansvars(int flush)
     }
 }
 
-// Outputs the time and the physical quantities a, adot/a (i.e. Hubble), and adotdot
+// Write the scale factor, Hubble rate, and scale-factor acceleration.
 void scale(int flush)
 {
     static FILE *sf_;
@@ -281,19 +323,24 @@ void scale(int flush)
         first = 0;
     }
 
+    const double acceleration =
+        std::pow(a, 3.0 - 2.0 * rescale_s)
+        * (2.0 * gradient_energy() / 3.0 + potential_energy())
+        - (rescale_s + 1.0) * pw2(ad) / a;
+
     // Output a, H, and adotdot in physical units using rescalings
     fprintf(sf_, "%f %f %e %e\n",
     t, a,
     ad * rescale_B * std::pow(a, rescale_s - 2.0),
     pw2(rescale_B) * std::pow(a, 2.0 * rescale_s - 2.0) *
-    (ad2 + (rescale_s - 1.0) * pw2(ad) / a));
+    (acceleration + (rescale_s - 1.0) * pw2(ad) / a));
 
     if (flush)
     fflush(sf_);
 }
 
-// Outputs power spectrum of the field and applies a high-momentum cutoff if enabled
-
+// Write the scalar power spectrum. If forcing_cutoff is enabled, this routine
+// also filters the live field and derivative in Fourier space before restoring them.
 void spectraf()
 {
     static FILE *spectra_, *spectratimes_;
@@ -461,7 +508,7 @@ namespace {
         }
     }
 
-    // Isotropically binned TT-projected spectrum from hij/hijd in real-space storage.
+    // Isotropically binned TT-projected spectrum over the shared output-shell range.
     // Output columns: k_phys, nmodes, spectrum.
     static void write_gw_spectrum_impl(
         FILE *out,
@@ -470,34 +517,33 @@ namespace {
         const GwScaleMode scale_mode,
         const double to_phys)
     {
-        const int   numbins   = (int)(std::sqrt(3.0) * (N/2)) + 1;
-        const int   i_max_out = (int)std::floor(0.80 * numbins);
-        const float dp        = 2.f * (float)pi / (float)L;
+        const int numbins = (int)(std::sqrt(3.0) * (N/2)) + 1;
 
         std::vector<int>   numpoints(numbins, 0);
         std::vector<float> p(numbins, 0.f), f2(numbins, 0.f);
-        for (int i = 0; i < numbins; ++i) p[i] = dp * i;
+        const std::vector<double>& bin_centers = effective_k_bin_centers();
+        for (int i = 0; i < numbins; ++i) p[i] = static_cast<float>(bin_centers[i]);
 
         int arraysize[] = {N, N, N};
         for (int c = 0; c < 6; ++c) fftrnf(h[c].data(), (float*)hnyq[c], 3, arraysize, 1);
 
         for (int i = 0; i < N; ++i) {
-            int px = (i <= N/2 ? i : i - N);
+            int px = spatial::signed_mode(i);
             for (int j = 0; j < N; ++j) {
-                int py = (j <= N/2 ? j : j - N);
+                int py = spatial::signed_mode(j);
 
                 // Interior r2c modes: 1 <= k < N/2 (count conjugate partner with weight 2).
                 for (int k = 1; k < N/2; ++k) {
                     int pz = k;
 
-                    float kx = (2.f/(float)dx) * std::sin((float)pi * px / (float)N);
-                    float ky = (2.f/(float)dx) * std::sin((float)pi * py / (float)N);
-                    float kz = (2.f/(float)dx) * std::sin((float)pi * pz / (float)N);
+                    float kx = static_cast<float>(spatial::effective_momentum_component(px, dx));
+                    float ky = static_cast<float>(spatial::effective_momentum_component(py, dx));
+                    float kz = static_cast<float>(spatial::effective_momentum_component(pz, dx));
                     float kt2 = kx*kx + ky*ky + kz*kz;
                     if (kt2 == 0.f) continue;
 
-                    int bin = (int)lroundf(std::sqrt((float)(px*px + py*py + pz*pz)));
-                    if (bin >= i_max_out) continue;
+                    int bin = spatial::shell_index(px, py, pz);
+                    if (bin >= numbins) continue;
 
                     size_t idx_mode = idx(i, j, 2*k);
 
@@ -551,14 +597,14 @@ namespace {
                     int k  = kk * (N/2);
                     int pz = k;
 
-                    float kx = (2.f/(float)dx) * std::sin((float)pi * px / (float)N);
-                    float ky = (2.f/(float)dx) * std::sin((float)pi * py / (float)N);
-                    float kz = (2.f/(float)dx) * std::sin((float)pi * pz / (float)N);
+                    float kx = static_cast<float>(spatial::effective_momentum_component(px, dx));
+                    float ky = static_cast<float>(spatial::effective_momentum_component(py, dx));
+                    float kz = static_cast<float>(spatial::effective_momentum_component(pz, dx));
                     float kt2 = kx*kx + ky*ky + kz*kz;
                     if (kt2 == 0.f) continue;
 
-                    int bin = (int)lroundf(std::sqrt((float)(px*px + py*py + pz*pz)));
-                    if (bin >= i_max_out) continue;
+                    int bin = spatial::shell_index(px, py, pz);
+                    if (bin >= numbins) continue;
 
                     const int j2 = 2*j;
 
@@ -627,7 +673,7 @@ namespace {
 } // anonymous namespace
 
 
-// Gravitational-wave tensor spectrum.
+// Write the TT-projected tensor power spectrum during inflation.
 void spectraGW()
 {
     static FILE *fp = nullptr;
@@ -637,7 +683,7 @@ void spectraGW()
 }
 
 
-// a^4 P_{hdot}(k) spectrum, stored in physical units.
+// Write the TT-projected tensor-velocity spectrum in physical units during inflation.
 void spectraGWdot()
 {
     static FILE *fp = nullptr;
@@ -648,7 +694,7 @@ void spectraGWdot()
 }
 
 
-// Gravitational-wave tensor spectrum (post-inflation).
+// Write the TT-projected tensor power spectrum during post-inflationary evolution.
 void spectraGW_post_inflation()
 {
     static FILE *fp = nullptr;
@@ -658,7 +704,7 @@ void spectraGW_post_inflation()
 }
 
 
-// a^4 P_{hdot}(k) spectrum (post-inflation), stored in physical units.
+// Write the post-inflationary tensor-velocity spectrum in physical units.
 void spectraGWdot_post_inflation()
 {
     static FILE *fp = nullptr;
@@ -670,17 +716,12 @@ void spectraGWdot_post_inflation()
 
 #endif
 
-//Outputs the 1D physical momentum, that takes into account the modified dispersion relation (see 2209.13616)
+// Write the effective physical momentum associated with each isotropic DFT bin.
+// The mapping uses the eigenvalue of the finite-difference Laplacian.
 void get_modes()
 {
     static FILE *modes_;
-    const int maxnumbins=(int)(1.73205*(N/2))+1; // Number of bins (bin spacing=lattice spacing in Fourier space) = sqrt(NDIMS)*(N/2)+1. Set for 3D (i.e. biggest possible).
-    int numpoints[maxnumbins]; // Number of points in each momentum bin
-    double p_phys[maxnumbins]; // Values for each bin: average physical momentum per bin
-    int numbins=(int)(std::sqrt(3.0)*(N/2))+1; // Actual number of bins for the number of dimensions
-    double pmagnitude, pphysical; // lattice |p| (bin index) and physical momentum
-    int i,j,k,px,py,pz; // px, py, and pz are components of momentum in units of grid spacing
-    const double norm1 = rescale_B;
+    const std::vector<double>& bin_centers = effective_k_bin_centers();
 
     static int first=1;
     if(first) // Open output files
@@ -690,46 +731,7 @@ void get_modes()
         first=0;
     }
 
-    for(i=0;i<numbins;i++) // Initialize all bins to 0
-    {
-        numpoints[i]=0;
-        p_phys[i]=0.;
-    }
-
-    for(i=0;i<N;i++)
-    {
-        px=(i<=N/2 ? i : i-N);
-        for(j=0;j<N;j++)
-        {
-            py=(j<=N/2 ? j : j-N);
-            // Modes with 0<k<N/2 are counted twice
-            for(k=1;k<N/2;k++)
-            {
-                pz=k;
-                pmagnitude=std::sqrt(pw2((double)px)+pw2((double)py)+pw2((double)pz));
-                pphysical=std::sqrt(4.0*pw2((double)N/(double)L)*(pw2(std::sin((double)px*pi/N))+pw2(std::sin((double)py*pi/N))+pw2(std::sin((double)pz*pi/N))));
-                numpoints[(int)pmagnitude] += 2;
-                p_phys[(int)pmagnitude]    += 2.0*pphysical;
-            }
-            // k=0 or k=N/2 counted once
-            for(k=0;k<=N/2;k+=N/2)
-            {
-                pz=k;
-                pmagnitude=std::sqrt(pw2((double)px)+pw2((double)py)+pw2((double)pz));
-                pphysical=std::sqrt(4.0*pw2((double)N/(double)L)*(pw2(std::sin((double)px*pi/N))+pw2(std::sin((double)py*pi/N))+pw2(std::sin((double)pz*pi/N))));
-
-                numpoints[(int)pmagnitude]++;
-                p_phys[(int)pmagnitude] += pphysical;
-            }
-        }
-    }
-    for(i=0;i<numbins;i++)
-    {
-        if(numpoints[i]>0) {
-            p_phys[i] = p_phys[i]/numpoints[i];
-        }
-        fprintf(modes_,"%e\n", (double)norm1 * p_phys[i]);
-    }
+    for (double momentum : bin_centers) fprintf(modes_, "%e\n", momentum);
 
     fprintf(modes_,"\n");
     fflush(modes_);
@@ -737,15 +739,14 @@ void get_modes()
     return;
 }
 
+// Write the equilateral scalar bispectrum using the code's established binning convention.
 void bispectraf()
 {
-    //This function outputs the equilateral bispectrum only (see 2209.13616, Sec. 5.3.2).
-    static FILE *bispectra_; // Output files for power spectra and times at which spectra were taken
-    const int maxnumbins=(int)(1.73205*(N/2))+1; // Number of bins
-    int numpoints[maxnumbins]; // Number of points in each momentum bin
-    double p[maxnumbins], bisreal[maxnumbins], bisimag[maxnumbins]; // bins
-    int numbins=(int)(std::sqrt(3.0)*(N/2))+1; // Actual number of bins for the number of dimensions
-    const double dp=2.0*pi/L; // Size of grid spacing in momentum space
+    static FILE *bispectra_; // Final-time equilateral scalar-bispectrum output
+    const int numbins=(int)(std::sqrt(3.0)*(N/2))+1; // Actual number of bins for the number of dimensions
+    std::vector<int> numpoints(numbins, 0); // Number of points in each momentum bin
+    std::vector<double> bisreal(numbins, 0.0), bisimag(numbins, 0.0);
+    const std::vector<double>& momenta = effective_k_bin_centers();
     double mean=0.;
     int i1,j1,k1;
     int i2,j2,k2,i2n,j2n;
@@ -774,17 +775,19 @@ void bispectraf()
         first=0;
     }
 
-    for(k=0;k<numbins;k++)
-    p[k]=dp*k;
-
-    for(k=0;k<numbins;k++)
-    {
-        numpoints[k]=0;
-        bisreal[k]=0.;
-        bisimag[k]=0.;
-    }
-
     fftrnd(f.data(), (double *)fnyquist_p, 3, arraysize, 1); // Transform field values to Fourier space
+
+    const auto load_mode = [&](int ii, int jj, int kk, bool conjugate,
+                               double& re, double& im) {
+        if (kk == N / 2) {
+            re = fnyquist_p[ii][2 * jj];
+            im = fnyquist_p[ii][2 * jj + 1];
+        } else {
+            re = f[idx(ii, jj, 2 * kk)];
+            im = f[idx(ii, jj, 2 * kk + 1)];
+        }
+        if (conjugate) im = -im;
+    };
 
     for(k=0;k<numbins;k++)
     {
@@ -816,28 +819,10 @@ void bispectraf()
                         j3=(py3>=0 ? py3 : py3+N);
                         if(std::abs(std::sqrt(pw2(px3)+pw2(py3)+pw2((double)k3))-kf)< 1.5 && k3 <= N/2)
                         {
-                            f1r = f[idx(i1,j1,2*k1)];
-                            f1i = f[idx(i1,j1,2*k1+1)];
-                            f2r = f[idx(i2,j2,2*k2)];
-                            f2i = f[idx(i2,j2,2*k2+1)];
-                            f3r = f[idx(i3,j3,2*k3)];
-                            f3i = f[idx(i3,j3,2*k3+1)];
+                            load_mode(i1, j1, k1, false, f1r, f1i);
+                            load_mode(i2, j2, k2, false, f2r, f2i);
+                            load_mode(i3, j3, k3, false, f3r, f3i);
                             counts = 1.;
-                            if( k1 == (int)(N/2))
-                            {
-                                f1r = fnyquist_p[i1][2*j1];
-                                f1i = fnyquist_p[i1][2*j1+1];
-                            }
-                            if( k2 == (int)(N/2))
-                            {
-                                f2r = fnyquist_p[i2][2*j2];
-                                f2i = fnyquist_p[i2][2*j2+1];
-                            }
-                            if( k3 == (int)(N/2))
-                            {
-                                f3r = fnyquist_p[i3][2*j3];
-                                f3i = fnyquist_p[i3][2*j3+1];
-                            }
                             if(k1 != (int)N/2 && k2 != (int)N/2 && (k1 != 0 || k2 != 0))
                             counts = 2.;
 
@@ -854,28 +839,9 @@ void bispectraf()
                                 i2n=(-px2 >=0 ? -px2 : -px2+N);
                                 j2n=(-py2 >=0 ? -py2 : -py2+N);
 
-                                f1r = f[idx(i1,j1,2*k1)];
-                                f1i = f[idx(i1,j1,2*k1+1)];
-                                f2r = f[idx(i2n,j2n,2*k2)];
-                                f2i = -f[idx(i2n,j2n,2*k2+1)];
-                                f3r = f[idx(i3,j3,2*k3)];
-                                f3i = f[idx(i3,j3,2*k3+1)];
-
-                                if( k1 == (int)(N/2))
-                                {
-                                    f1r = fnyquist_p[i1][2*j1];
-                                    f1i = fnyquist_p[i1][2*j1+1];
-                                }
-                                if( k2 == (int)(N/2))
-                                {
-                                    f2r = fnyquist_p[i2n][2*j2n];
-                                    f2i = -fnyquist_p[i2n][2*j2n+1];
-                                }
-                                if( k3 == (int)(N/2))
-                                {
-                                    f3r = fnyquist_p[i3][2*j3];
-                                    f3i = fnyquist_p[i3][2*j3+1];
-                                }
+                                load_mode(i1, j1, k1, false, f1r, f1i);
+                                load_mode(i2n, j2n, k2, true, f2r, f2i);
+                                load_mode(i3, j3, k3, false, f3r, f3i);
 
                                 numpoints[k] += 2;
                                 bisreal[k] += 2.0*(f1r*f2r*f3r - f1i*f2i*f3r + f1i*f2r*f3i + f2i*f1r*f3i);
@@ -896,7 +862,7 @@ void bispectraf()
         }
 
         fprintf(bispectra_,"%e %d %e %e\n",
-        p[k],numpoints[k],norm1*bisreal[k],norm1*bisimag[k]);
+        momenta[k],numpoints[k],norm1*bisreal[k],norm1*bisimag[k]);
     }
 
     fftrnd(f.data(), (double *)fnyquist_p, 3, arraysize, -1);
@@ -910,6 +876,7 @@ void bispectraf()
     return;
 }
 
+// Write a complete three-dimensional scalar-field snapshot.
 void box()
 {
     static FILE *box_;
@@ -930,14 +897,12 @@ void box()
     fflush(box_);
 }
 
+// Write a fixed two-dimensional slice of the scalar field.
 void box2d()
 {
     static FILE *snapshots_2d_phi_;
-    int i, j, k;
-    if(N < 64)
-    i = 5;
-    else
-    i = 50;
+    const int i = snapshot_slice_index();
+    int j, k;
 
     static int first=1;
     if(first) // Open output files
@@ -955,14 +920,12 @@ void box2d()
     fflush(snapshots_2d_phi_);
 }
 
+// Write the matching two-dimensional slice of the scalar velocity.
 void box2dot()
 {
     static FILE *snapshots_2d_phidot_;
-    int i, j, k;
-    if(N < 64)
-    i = 5;
-    else
-    i = 50;
+    const int i = snapshot_slice_index();
+    int j, k;
 
     static int first=1;
     if(first) // Open output files
@@ -974,18 +937,21 @@ void box2dot()
 
     for(j=0;j<N;j++) for(k=0;k<N;k++)
     {
-        fprintf(snapshots_2d_phidot_,"%.17g\n",fd[idx(i,j,k)] * rescale_B);
+        fprintf(snapshots_2d_phidot_, "%.17g\n",
+                fd[idx(i,j,k)] * rescale_B * std::pow(a, rescale_s - 1.0));
     }
     fprintf(snapshots_2d_phidot_,"\n");
     fflush(snapshots_2d_phidot_);
 }
 
+// Write kinetic, gradient, and potential energies plus the Friedmann constraint ratio.
 void energy()
 {
     static FILE *energy_, *conservation_;
     double deriv_energy, grad_energy, pot_energy;
 
     double totalE = 0.;
+    const double physical_energy_scale = pw2(rescale_B);
     static int first = 1;
     if (first) // Open output files
     {
@@ -1004,17 +970,17 @@ void energy()
     // Calculate and output kinetic (time derivative) energy
     deriv_energy = kin_energy();
     totalE += deriv_energy;
-    fprintf(energy_, " %e", deriv_energy * rescale_B);
+    fprintf(energy_, " %e", deriv_energy * physical_energy_scale);
 
     // Calculate and output gradient energy
     grad_energy = gradient_energy();
     totalE += grad_energy;
-    fprintf(energy_, " %e", grad_energy * rescale_B);
+    fprintf(energy_, " %e", grad_energy * physical_energy_scale);
 
     // Calculate and output potential energy
     pot_energy = potential_energy();
     totalE += pot_energy;
-    fprintf(energy_, " %e", pot_energy * rescale_B);
+    fprintf(energy_, " %e", pot_energy * physical_energy_scale);
 
     fprintf(energy_, "\n");
     fflush(energy_);
@@ -1025,6 +991,7 @@ void energy()
     fflush(conservation_);
 }
 
+// Format an elapsed duration in days, hours, minutes, and seconds.
 void readable_time(int t, FILE *info_)
 {
     int tminutes = 60, thours = 60 * tminutes, tdays = 24 * thours;
@@ -1067,6 +1034,7 @@ void readable_time(int t, FILE *info_)
     return;
 }
 
+// Write a normalized one-point histogram of the scalar field and its bin metadata.
 void histograms()
 {
     static FILE *histogram_, *histogramtimes_;
@@ -1137,6 +1105,7 @@ void histograms()
 #if perform_deltaN
 
 
+// Write the power spectrum of the mean-subtracted deltaN field.
 void spectraN()
 {
     static FILE *spectraN_;
@@ -1170,6 +1139,7 @@ void spectraN()
 
 
 
+// Write the complete three-dimensional deltaN field.
 void boxN()
 {
     static FILE *boxN_;
@@ -1192,14 +1162,12 @@ void boxN()
     fflush(boxN_);
 }
 
+// Write a fixed two-dimensional slice of the deltaN field.
 void box2dN()
 {
     static FILE *snapshots_2d_deltaN_;
-    int i, j, k;
-    if (N < 64)
-    i = 5;
-    else
-    i = 50;
+    const int i = snapshot_slice_index();
+    int j, k;
     static int first = 1;
     if (first) // Open output file
     {
@@ -1217,14 +1185,14 @@ void box2dN()
     fflush(snapshots_2d_deltaN_);
 }
 
-void histogramsN()
+// Write a normalized one-point histogram of completed deltaN patches.
+void histogramsN(const std::vector<unsigned char>& completed)
 {
     static FILE *histogramN_, *histogramtimesN_;
-    int i=0, j=0, k=0;
     int binnum;
     static std::vector<double> binfreq;
     double bmin, bmax, df;
-    int numpts;
+    std::size_t numpts;
 
     static int first = 1;
     if (first)
@@ -1239,26 +1207,28 @@ void histogramsN()
 
     fprintf(histogramtimesN_, "%f %e", t, a);
 
-    bmin = deltaN[idx(0,0,0)];
-    bmax = bmin;
-    LOOP
-    {
-        bmin = (deltaN[idx(i,j,k)] < bmin ? deltaN[idx(i,j,k)] : bmin);
-        bmax = (deltaN[idx(i,j,k)] > bmax ? deltaN[idx(i,j,k)] : bmax);
+    bmin = std::numeric_limits<double>::infinity();
+    bmax = -std::numeric_limits<double>::infinity();
+    for (std::size_t id = 0; id < deltaN.size(); ++id) {
+        if (!completed[id]) continue;
+        bmin = std::min(bmin, deltaN[id]);
+        bmax = std::max(bmax, deltaN[id]);
     }
 
-    df = (bmax - bmin) / (double)(nbins);
+    const bool single_value_histogram = (bmax == bmin);
+    df = single_value_histogram ? 1.0 : (bmax - bmin) / (double)(nbins);
     if (!std::isfinite(df) || df <= 0.0) df = 1.0;
 
     if ((int)binfreq.size() != nbins) binfreq.assign(nbins, 0.0);
     else std::fill(binfreq.begin(), binfreq.end(), 0.0);
 
     numpts = 0;
-    LOOP
-    {
-        binnum = (int)((deltaN[idx(i,j,k)] - bmin) / df);
-        if (deltaN[idx(i,j,k)] == bmax)
-        binnum = nbins - 1;
+    for (std::size_t id = 0; id < deltaN.size(); ++id) {
+        if (!completed[id]) continue;
+        binnum = single_value_histogram
+            ? nbins - 1
+            : (int)((deltaN[id] - bmin) / df);
+        if (deltaN[id] == bmax) binnum = nbins - 1;
         if (binnum >= 0 && binnum < nbins)
         {
             binfreq[binnum]++;
@@ -1266,8 +1236,12 @@ void histogramsN()
         }
     }
 
-    if (numpts == 0) numpts = 1;
-    for (i = 0; i < nbins; i++)
+    if (numpts == 0) {
+        std::fprintf(stderr, "No finite completed deltaN patches are available for the histogram.\n");
+        std::exit(1);
+    }
+
+    for (int i = 0; i < nbins; i++)
     fprintf(histogramN_, "%e\n", binfreq[i] / (double)numpts);
     fprintf(histogramN_, "\n");
     fflush(histogramN_);
@@ -1277,6 +1251,7 @@ void histogramsN()
 }
 
 
+// Write the spectrum of the optional logarithmic curvature mapping.
 void spectraLOG()
 {
     static FILE *spectraLOG_;
@@ -1309,6 +1284,7 @@ void spectraLOG()
 
 
 
+// Write the one-point histogram of the optional logarithmic curvature mapping.
 void histogramsLOG()
 {
     static FILE *histogramLOG_, *histogramtimesLOG_;
@@ -1404,8 +1380,8 @@ void histogramsLOG()
 
 #endif
 
-// Output information about the run parameters.
-// This need only be called at the beginning and end of the run.
+// On its first call, record the resolved configuration and start time. On its
+// second call, append the end time and elapsed wall-clock duration.
 void output_parameters()
 {
     static FILE *info_;
@@ -1425,6 +1401,7 @@ void output_parameters()
         fprintf(info_, "f0=%f\n", initial_field);
         fprintf(info_, "fd0=%f\n", initial_derivative);
         fprintf(info_, "dt=%f, dt/dx=%f\n", dt, dt / dx);
+        fprintf(info_, "spatial_stencil_order=%d\n", spatial::order);
         fprintf(info_, "inflation_integrator=%s\n", integrator_name());
 #if perform_deltaN
         fprintf(info_, "deltaN_integrator=%s\n", deltaN_integrator_name());
@@ -1448,6 +1425,12 @@ void output_parameters()
         }
         fprintf(info_, "rescale_s=%f\n", rescale_s);
         fprintf(info_, "rescale_B=%e\n", rescale_B);
+        if (initial_mass_squared.has_value()) {
+            fprintf(info_, "initial_mass_squared=%.17g\n", *initial_mass_squared);
+        } else {
+            fprintf(info_, "initial_mass_squared=not_set\n");
+        }
+        fprintf(info_, "linear_metric_perturbations=%d\n", linear_metric_perturbations);
         time(&tStart);
         fprintf(info_, "\nRun began at %s", ctime(&tStart)); // Output date in readable form
         first = 0;
@@ -1465,7 +1448,8 @@ void output_parameters()
     return;
 }
 
-// Calculate and save quantities (means, variances, etc.). If force>0 infrequent calculations are performed
+// Dispatch inflationary outputs. For leapfrog, temporarily synchronize fields
+// and derivatives before diagnostics, then restore the staggered state.
 void save(int infrequent)
 {
     if (inflation_uses_staggered_derivatives() && t > 0.) // Synchronize field values and derivatives
@@ -1502,6 +1486,7 @@ void save(int infrequent)
     evolve_fields(.5 * dt * pow(astep, rescale_s - 1));
 }
 
+// Write products that are defined only for the final inflationary state.
 void save_last()
 {
     get_modes();
@@ -1511,7 +1496,8 @@ void save_last()
 #if perform_deltaN
     if (output_LOG)
     {
-        //careful if you place these functions somewhere else, they use the vector deltaN as ausiliary variable
+        deltaN.resize(static_cast<std::size_t>(gridsize));
+        // The logarithmic mapping outputs use deltaN as a temporary lattice field.
         spectraLOG();
         histogramsLOG();
     }
@@ -1519,60 +1505,79 @@ void save_last()
 }
 
 #if perform_deltaN
-void saveN()
+// Mean-subtract and mask incomplete patches before writing final deltaN products.
+void saveN([[maybe_unused]] FILE* output_log)
 {
-    if (deltaN_uses_staggered_derivatives() && t > 0.)
-    evolve_fieldsN(-.5 * dN);
+    std::vector<unsigned char> completed(deltaN.size(), 0);
+    std::size_t completed_count = 0;
+    double Nmean = 0.0;
 
-    float Nmean = 0.;
-    DECLARE_INDICES
-
-    const double deltaN_cutoff = Nend - (deltaN_uses_staggered_derivatives() ? dN : 0.0);
-
-    LOOP
-    {
-        if (deltaN[idx(i,j,k)] <= deltaN_cutoff)
-        Nmean += deltaN[idx(i,j,k)];
-    }
-    Nmean = Nmean / gridsize;
-
-    LOOP
-    {
-        deltaN[idx(i,j,k)] -= Nmean;
+    for (std::size_t id = 0; id < deltaN.size(); ++id) {
+        if (!std::isfinite(f[id]) || !std::isfinite(deltaN[id])) {
+            std::fprintf(stderr, "Non-finite state encountered while finalizing deltaN outputs.\n");
+            std::exit(1);
+        }
+        if (!deltaN_patch_is_active(f[id])) {
+            completed[id] = 1;
+            ++completed_count;
+            Nmean += deltaN[id];
+        }
     }
 
-    histogramsN();
+    if (completed_count == 0) {
+        std::fprintf(stderr,
+            "No deltaN patch reached the selected hypersurface within Nend=%g.\n",
+            Nend);
+        std::exit(1);
+    }
+    Nmean /= static_cast<double>(completed_count);
+
+#if post_inflation
+    if (completed_count != deltaN.size()) {
+        std::fprintf(stderr,
+            "The post-inflationary stage requires every deltaN patch to reach the selected hypersurface "
+            "(%zu of %zu completed). Increase Nend.\n",
+            completed_count, deltaN.size());
+        std::exit(1);
+    }
+#else
+    if (completed_count != deltaN.size()) {
+        std::fprintf(stderr,
+            "Warning: %zu of %zu deltaN patches did not reach the selected hypersurface; "
+            "they are excluded from the histogram and masked in spatial outputs.\n",
+            deltaN.size() - completed_count, deltaN.size());
+        std::fprintf(output_log,
+            "Warning: %zu of %zu deltaN patches did not reach the selected hypersurface; "
+            "they are excluded from the histogram and masked in spatial outputs.\n",
+            deltaN.size() - completed_count, deltaN.size());
+        std::fflush(output_log);
+    }
+#endif
+
+    for (std::size_t id = 0; id < deltaN.size(); ++id) {
+        deltaN[id] = completed[id] ? deltaN[id] - Nmean : 0.0;
+    }
+
+    histogramsN(completed);
 
     if (output_box2D)
     box2dN();
 
-    LOOP
-    {
-        if (deltaN[idx(i,j,k)] > (deltaN_cutoff - Nmean))
-        deltaN[idx(i,j,k)] = 0;
-    }
-
     if (output_spectra)
     spectraN();
 
-    if (deltaN_uses_staggered_derivatives() && t > 0.)
-    evolve_fieldsN(.5 * dN);
 }
 #else
-// Stub to avoid link errors when perform_deltaN==0
-void saveN() {}
+// No-op implementation keeps the common output interface linkable when deltaN is disabled.
+void saveN(FILE*) {}
 #endif
 
 
-// Post-Inflation part of the output code
-//
-//
-//
-//
+// -------------------- Post-inflationary outputs --------------------
 
 #if post_inflation
 
-// Computes spatial averages and variances of the field and its derivative
+// Write post-inflationary scalar means, variances, and mean velocity.
 void meansvars_post_inflation(int flush)
 {
     static FILE *means_, *vars_, *velocity_;
@@ -1607,16 +1612,20 @@ void meansvars_post_inflation(int flush)
     {
         av += f[idx(i,j,k)];
         vel += fd[idx(i,j,k)];
-        var += pw2(f[idx(i,j,k)]);
     }
-    av = av / (double)gridsize; // Convert sum to average
-    vel = vel / (double)gridsize;
+    const double inv_gridsize = 1.0 / static_cast<double>(gridsize);
+    av  *= inv_gridsize;
+    vel *= inv_gridsize;
+
+    // Use the centered form for an accurate variance when fluctuations are small.
+    LOOP var += pw2(f[idx(i,j,k)] - av);
+    var *= inv_gridsize;
 
     vel = vel * pow(a, rescale_s - 1) * rescale_B;
 
     fprintf(means_, " %e", av);
     fprintf(velocity_, " %e", vel);
-    fprintf(vars_, " %e", var - pw2(av));
+    fprintf(vars_, " %e", var);
     // Check for instability. See if the field has grown exponentially and become non-numerical at any point.
     if (av + FLT_MAX == av || (av != 0. && av / av != 1.))
     {
@@ -1638,7 +1647,7 @@ void meansvars_post_inflation(int flush)
     }
 }
 
-// Outputs the time and the physical quantities a, adot/a (i.e. Hubble), and adotdot
+// Write post-inflationary background expansion quantities.
 void scale_post_inflation(int flush)
 {
     static FILE *sf_;
@@ -1651,19 +1660,21 @@ void scale_post_inflation(int flush)
         first = 0;
     }
 
+    const double acceleration =
+        -(rescale_s - 0.5 * (1.0 - 3.0 * omega)) * pw2(ad) / a;
+
     // Output a, H, and adotdot in physical units using rescalings
     fprintf(sf_, "%f %f %e %e\n",
     t, a,
     ad * rescale_B * pow(a, rescale_s - 2.),
     pw2(rescale_B) * pow(a, 2. * rescale_s - 2.) *
-    (ad2 + (rescale_s - 1.) * pw2(ad) / a));
+    (acceleration + (rescale_s - 1.) * pw2(ad) / a));
 
     if (flush)
     fflush(sf_);
 }
 
-// Outputs power spectrum of the field and applies a high-momentum cutoff if enabled
-
+// Write the post-inflationary scalar spectrum and apply the optional live cutoff.
 void spectraf_post_inflation()
 {
     static FILE *spectra_, *spectratimes_;
@@ -1769,6 +1780,7 @@ void spectraf_post_inflation()
 
 }
 
+// Write the post-inflationary scalar one-point histogram and bin metadata.
 void histograms_post_inflation()
 {
     static FILE *histogram_, *histogramtimes_;
@@ -1836,7 +1848,7 @@ void histograms_post_inflation()
     fflush(histogramtimes_);
 }
 
-// Calculate and save quantities
+// Dispatch post-inflationary outputs while respecting leapfrog staggering.
 void save_post_inflation(int infrequent)
 {
     if (post_inflation_uses_staggered_derivatives() && t > 0.) // Synchronize field values and derivatives
