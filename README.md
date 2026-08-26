@@ -143,7 +143,7 @@ If `Nend` is reached before every patch crosses the selected surface, the code r
 
 These parameters are used when `post_inflation=1`:
 
-- `dt_post_inflation`, `af_post_inflation`: time step and final scale factor (`af_post_inflation` defaults to `2*N` if omitted). Verify time-step convergence by repeating the post-inflationary evolution with a smaller `dt_post_inflation`.
+- `dt_post_inflation`, `af_post_inflation`: time step and final scale factor (`af_post_inflation` defaults to `2*N` if omitted).
 - `omega`: constant equation-of-state parameter $w$.
 
 #### Integrator Selection
