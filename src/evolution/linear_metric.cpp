@@ -51,11 +51,13 @@ LinearMetricBackground compute_background(
     background.field_mean = field_sum * inv_size;
     background.deriv_mean = deriv_sum * inv_size;
 
-    const double hubble_code = scale_factor_derivative / scale_factor;
+    const double code_hubble = scale_factor_derivative / scale_factor;
     const double potential_deriv_mean = potential_deriv_sum * inv_size;
-    const double potnorm = std::pow(scale_factor, 2.0 - 2.0 * rescale_s);
-    background.deriv2_mean = -(2.0 + rescale_s) * hubble_code * background.deriv_mean
-                           - potnorm * potential_deriv_mean;
+    const double potential_force_coefficient =
+        std::pow(scale_factor, 2.0 - 2.0 * rescale_s);
+    background.deriv2_mean =
+        -(2.0 + rescale_s) * code_hubble * background.deriv_mean
+        - potential_force_coefficient * potential_deriv_mean;
     return background;
 }
 
@@ -82,9 +84,9 @@ LinearMetricCorrection compute_linear_metric_correction(
         field, field_derivative, scale_factor, scale_factor_derivative);
 
     correction.field_mean = background.field_mean;
-    const double hubble_code = scale_factor_derivative / scale_factor;
+    const double code_hubble = scale_factor_derivative / scale_factor;
     correction.rhs_coefficient = (rescale_s + 3.0) * pw2(background.deriv_mean)
-        + 2.0 * background.deriv_mean * background.deriv2_mean / hubble_code
+        + 2.0 * background.deriv_mean * background.deriv2_mean / code_hubble
         - pw2(background.deriv_mean) * scale_factor * scale_factor_second_derivative
             / pw2(scale_factor_derivative);
     return correction;

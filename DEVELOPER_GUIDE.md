@@ -16,16 +16,24 @@ Compile-time switches in `src/parameters.h` determine which stages and data stru
 
 ## Module responsibilities
 
-- `main.cpp` owns startup, input loading, output-directory creation, and stage ordering.
-- `parameters.h` declares compile-time switches and the run-time configuration interface.
-- `runtime_parameters.cpp` defines defaults, parses `params.txt`, and validates derived controls.
-- `initialize.cpp` constructs Fourier-space vacuum modes, enforces Hermitian symmetry, transforms them to real space, and prepares optional stages.
-- `potential.cpp` is the only potential interface used by the evolution code. It supports either analytic functions or descending tabulated data.
-- `spatial_discretization.h` defines the second-, fourth-, and sixth-order centered spatial operators, their Fourier eigenvalues, momentum-shell convention, and stencil-dependent stability bound.
-- `evolution.cpp` contains leapfrog/RK integration, stage-specific right-hand sides, stopping logic, and compact wrappers around the selected spatial operators.
-- `linear_metric.cpp` computes the optional linear scalar metric correction from spatially averaged lattice quantities.
-- `output.cpp` computes diagnostics and writes the stable text-output schema.
-- `ffteasy.hpp` provides the inherited in-place FFT implementation and separate Nyquist-plane convention.
+- `src/main.cpp` owns startup, input loading, output-directory creation, and stage ordering.
+- `src/parameters.h` declares compile-time switches and the run-time configuration interface.
+- `src/runtime_parameters.cpp` defines defaults, parses `params.txt`, and validates derived controls.
+- `src/initialize.cpp` constructs Fourier-space vacuum modes, enforces Hermitian symmetry, transforms them to real space, and prepares optional stages.
+- `src/potential.cpp` is the only potential interface used by the evolution code. It supports either analytic functions or descending tabulated data.
+- `src/spatial_discretization.h` defines the second-, fourth-, and sixth-order centered spatial operators, their Fourier eigenvalues, momentum-shell convention, and stencil-dependent stability bound.
+- `src/output.cpp` computes diagnostics and writes the stable text-output schema.
+- `src/ffteasy.hpp` provides the inherited in-place FFT implementation and separate Nyquist-plane convention.
+
+The time-evolution implementation is grouped under `src/evolution/`:
+
+- `src/evolution/evolution.cpp` owns the inflationary control loop, including integrator selection and output cadence.
+- `src/evolution/inflation.cpp` contains the inflationary right-hand sides, leapfrog updates, and energy diagnostics.
+- `src/evolution/integrators.cpp` contains the leapfrog drift and the RK4/RK45 machinery shared by the inflationary and post-inflationary phases.
+- `src/evolution/deltaN.cpp` contains the separate-universe equations, stopping logic, and $\delta N$ control loop.
+- `src/evolution/post_inflation.cpp` contains the post-inflationary scalar and tensor equations and control loop.
+- `src/evolution/evolution_internal.h` declares the derivative wrappers and integration interfaces shared only within this subsystem.
+- `src/evolution/linear_metric.cpp` and `src/evolution/linear_metric.h` implement the optional linear scalar metric correction from spatially averaged lattice quantities.
 
 ## Numerical consistency
 
@@ -35,7 +43,7 @@ Compile-time switches in `src/parameters.h` determine which stages and data stru
 
 GW spectra are written over the same output shells as the scalar spectra. A self-conjugate Nyquist component has no unambiguous sign for the real projector momentum, so projected values for modes containing such a component are convention-dependent UV diagnostics rather than physical predictions. Near the lattice UV boundary, the first-derivative and Laplacian symbols differ and finite differences do not obey the continuum product rule exactly, so cancellations in the post-inflationary source require explicit resolution and stencil-order convergence checks.
 
-The order-2 kernels in the compact `evolution.cpp` wrappers intentionally retain the original hot path. This preserves default-run performance, while orders 4 and 6 delegate to the shared helper. The tensor sector requires both first derivatives and same-axis or mixed second derivatives, so a spatial-order change must cover all three operator families rather than only the scalar Laplacian.
+The order-2 kernels in the evolution modules intentionally retain the original hot path. This preserves default-run performance, while orders 4 and 6 delegate to the shared spatial-discretization helper. The tensor sector requires both first derivatives and same-axis or mixed second derivatives, so a spatial-order change must cover all three operator families rather than only the scalar Laplacian.
 
 Real-to-complex transforms operate in place and store the final Nyquist plane in a separate buffer. Any routine that transforms a live field for diagnostics must restore the real-space field before returning.
 
@@ -43,7 +51,7 @@ Real-to-complex transforms operate in place and store the final Nyquist plane in
 
 Leapfrog stores fields and derivatives at half-step offsets. Output routines temporarily synchronize them and restore the staggered state afterward. RK4 and RK45 store fields and derivatives at the same time. An RK45 rejection must not modify the accepted global state.
 
-The inflation, deltaN, and post-inflation stages have independent integrator selections. A change to shared RK staging must therefore be tested in every compiled stage.
+The inflation, deltaN, and post-inflation stages have independent integrator selections. The first and third stages share the field RK machinery in `src/evolution/integrators.cpp`; the $\delta N$ stage uses its own state layout and reuses the same RK coefficients and acceptance policy. A change to shared RK staging must therefore be tested in every compiled stage.
 
 ### Potentials and rescaling
 
@@ -61,7 +69,7 @@ The deltaN loop treats lattice sites as independent homogeneous patches. The com
 
 Tensor fields use six packed symmetric components in the order `[xx, yy, zz, xy, xz, yz]`. They are evolved without a transverse-traceless projection in real space; the projection is applied when spectra are constructed. Changes to component packing must update evolution, FFT buffers, and output contractions together.
 
-At the beginning of the post-inflationary evolution, the code resets the scale factor to $a=1$ and sets $\partial_{\tilde\tau}a=f_{\rm hor}\,2\pi N/L$, where $f_{\rm hor}$ is the run-time parameter `horizon_factor`. This parameter controls the initial Hubble scale relative to the lattice resolution. Its default value places even the shortest resolved wavelengths well outside the Hubble horizon, as required when initializing $\Phi$ from the super-Hubble relation to $\zeta$.
+At the beginning of the post-inflationary evolution, the code resets the scale factor to $a=1$ and sets $\partial_{\tilde\tau}a=f_{\rm hor}\,2\pi N/L$, where $f_{\rm hor}$ is the run-time parameter `horizon_factor`. This parameter controls the initial Hubble scale relative to the lattice resolution. The default places the full resolved range outside the Hubble scale, but the most ultraviolet modes are not necessarily deeply super-Hubble. Applications that require the complete range to satisfy $k/(aH)\ll1$ should increase `horizon_factor` and test sensitivity to this choice.
 
 ### Optional linear metric correction
 
@@ -89,5 +97,8 @@ For any model or algorithm change:
 6. run all affected integrators and optional stages;
 7. run `make test` for the spatial-operator checks and clean-tree smoke matrix;
 8. before a release, run `make test-sanitizers` and `make test-release` for the broader integrator, stencil, and optional-feature coverage.
+
+For a source-only refactor, also run `tests/refactor_equivalence.py` against the
+pre-refactor revision and require byte-for-byte agreement of deterministic outputs.
 
 New physics modules should include a focused validation case and a brief statement of their regime of applicability.

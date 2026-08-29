@@ -153,27 +153,27 @@ int main() {
     }
 #endif
 
-    FILE* output_ = fopen("results/output.txt", "w");
-    if (!output_) {
+    FILE* output_log = fopen("results/output.txt", "w");
+    if (!output_log) {
         std::cerr << "Failed to open output file.\n";
         return 1;
     }
 
-    initialize_simulation();     // Initialize the simulation
-    run_evolution_loop(output_); // Run the main evolution loop
+    initialize_simulation();            // Initialize the simulation
+    run_inflation_loop(output_log);      // Run the inflationary lattice evolution
 
 #if perform_deltaN
-    run_deltaN_loop(output_);    // Run the deltaN evolution loop
+    run_deltaN_loop(output_log);         // Run the deltaN evolution loop
 #endif
 
 #if post_inflation
-    run_post_inflation_loop(output_);    // Run the post inflation evolution loop
+    run_post_inflation_loop(output_log); // Run the post-inflation evolution loop
 #endif
 
     output_parameters();
-    fprintf(output_, "InflationEasy program finished\n");
+    fprintf(output_log, "InflationEasy program finished\n");
     printf("InflationEasy program finished\n");
 
-    fclose(output_);
+    fclose(output_log);
     return 0;
 }

@@ -5,7 +5,7 @@
 
 **InflationEasy** is a lattice code specifically developed for cosmological inflation. It simulates the nonlinear dynamics of a scalar field on a three-dimensional lattice in an expanding FLRW universe using finite-difference spatial derivatives. Building on the well-known [LATTICEEASY](http://www.felderbooks.com/latticeeasy/) by Gary Felder and Igor Tkachev, the code incorporates several features tailored to inflationary applications, including a nonperturbative $\delta N$ calculation of the curvature perturbation $\zeta$, optional linear scalar metric corrections, and the calculation of scalar-induced gravitational waves generated during inflation and at subsequent horizon re-entry.
 
-More information is available in the associated publication: [arXiv:2506.11797](https://arxiv.org/abs/2506.11797). **Note:** The associated paper is currently under review. Version 1.1.0 includes features introduced after the current arXiv version, such as selectable higher-order spatial stencils and optional linear metric corrections. In case of discrepancies with the arXiv version, this documentation takes precedence.
+More information is available in the associated publication: [arXiv:2506.11797](https://arxiv.org/abs/2506.11797). **Note:** The associated paper is currently under review. Version 1.1.1 includes features introduced after the current arXiv version, such as selectable higher-order spatial stencils and optional linear metric corrections. In case of discrepancies with the arXiv version, this documentation takes precedence.
 
 ## Key Features
 
@@ -176,18 +176,30 @@ The documentation and outputs use natural units, $\hbar=c=1$, and dimensionful q
 ## Code Structure
 
 ### Source files (`src/`)
+
+The top-level source files provide program orchestration and numerical
+infrastructure:
+
 - `main.cpp`: Entry point of the program; orchestrates the simulation workflow.
 - `main.h`: Declares the shared simulation state and core functions.
 - `initialize.cpp`: Prepares the scalar, expansion, and optional tensor initial conditions.
-- `evolution.cpp`: Implements the inflation, deltaN, and post-inflation evolution stages.
 - `spatial_discretization.h`: Defines the selectable spatial operators and their Fourier-space effective momenta.
-- `linear_metric.cpp` / `linear_metric.h`: Implement the optional linear scalar metric correction.
 - `ffteasy.hpp`: Provides the FFT routines inherited from LATTICEEASY.
 - `output.cpp`: Handles writing results to disk, including observables and diagnostics.
 - `potential.cpp`: Defines the inflationary potential, either analytically or via input files.
 - `parameters.h`: Compile-time configuration for the potential representation (numerical vs. analytical), optional modules, number of lattice points per spatial direction, and spatial stencil order.
   **Important:** Edit this file only for settings that require recompilation.
 - `runtime_parameters.cpp`: Run-time defaults and parser for `params.txt` overrides.
+
+The evolution subsystem is grouped under `src/evolution/` by responsibility:
+
+- `evolution/evolution.cpp`: Runs the inflationary time-evolution loop and selects its integrator.
+- `evolution/inflation.cpp`: Implements the inflationary equations, energy diagnostics, and leapfrog updates.
+- `evolution/integrators.cpp`: Provides the shared leapfrog drift and RK4/RK45 stepping machinery.
+- `evolution/deltaN.cpp`: Implements the separate-universe $\delta N$ evolution and stopping conditions.
+- `evolution/post_inflation.cpp`: Implements the post-inflationary scalar and tensor evolution.
+- `evolution/linear_metric.cpp` / `evolution/linear_metric.h`: Implement the optional linear scalar metric correction.
+- `evolution/evolution_internal.h`: Declares interfaces shared only within the evolution subsystem.
 
 ### Input files (`inputs/`)
 These files are only required when using a **numerical potential** (`numerical_potential = 1` in `parameters.h`):
@@ -208,8 +220,9 @@ Each file should contain a single column of finite values, one per line. The thr
 ### Tests (`tests/`)
 - `spatial_discretization_test.cpp`: Checks each spatial stencil against its Fourier eigenvalue.
 - `release_smoke.py`: Runs the clean-tree smoke, sanitizer, and pre-release configuration matrices.
+- `refactor_equivalence.py`: Compares deterministic outputs from a source-only refactor against a selected Git revision.
 
-Users extending the C++ implementation should read [`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md), which documents the relationships that must remain consistent among potentials, spatial stencils, integrators, optional modules, and outputs.
+Users extending the C++ implementation should read [`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md), which documents the responsibilities of these modules and the relationships that must remain consistent among potentials, spatial stencils, integrators, optional modules, and outputs.
 
 ## Reproducibility Notes
 
@@ -226,7 +239,7 @@ Users extending the C++ implementation should read [`DEVELOPER_GUIDE.md`](DEVELO
 
 The complete module map and modification checklist are provided in [`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md).
 
-If you modify `src/evolution.cpp`, keep these invariants unchanged unless you intentionally redesign the algorithm:
+If you modify the evolution modules listed above, keep these invariants unchanged unless you intentionally redesign the algorithm:
 
 - Periodic finite-difference stencils for all lattice derivatives.
 - Leapfrog staggering semantics (half-step synchronization only at output boundaries).
@@ -247,6 +260,13 @@ integrator, stencil, and optional-feature matrix:
 ```bash
 make test-sanitizers
 make test-release
+```
+
+For a source-only architectural change, compare every deterministic output in
+the dedicated equivalence matrix against the intended baseline, for example:
+
+```bash
+python3 tests/refactor_equivalence.py --reference v1.1.0 --current-worktree
 ```
 
 `make test-spatial` remains available when only the second-, fourth-, and

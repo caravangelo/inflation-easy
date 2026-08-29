@@ -509,7 +509,8 @@ namespace {
     }
 
     // Isotropically binned TT-projected spectrum over the shared output-shell range.
-    // Output columns: k_phys, nmodes, spectrum.
+    // Output columns: comoving effective momentum (in reduced Planck units),
+    // number of modes, and spectrum.
     static void write_gw_spectrum_impl(
         FILE *out,
         std::vector<float> (&h)[6],
@@ -527,6 +528,9 @@ namespace {
         int arraysize[] = {N, N, N};
         for (int c = 0; c < 6; ++c) fftrnf(h[c].data(), (float*)hnyq[c], 3, arraysize, 1);
 
+        // A self-conjugate Nyquist component has no unambiguous sign for the
+        // real projector momentum. Modes containing one are retained only as
+        // convention-dependent UV diagnostics; see DEVELOPER_GUIDE.md.
         for (int i = 0; i < N; ++i) {
             int px = spatial::signed_mode(i);
             for (int j = 0; j < N; ++j) {
@@ -716,7 +720,8 @@ void spectraGWdot_post_inflation()
 
 #endif
 
-// Write the effective physical momentum associated with each isotropic DFT bin.
+// Write the comoving effective momentum (in reduced Planck units) associated
+// with each isotropic DFT bin.
 // The mapping uses the eigenvalue of the finite-difference Laplacian.
 void get_modes()
 {
@@ -1453,7 +1458,7 @@ void output_parameters()
 void save(int infrequent)
 {
     if (inflation_uses_staggered_derivatives() && t > 0.) // Synchronize field values and derivatives
-    evolve_fields(-.5 * dt * pow(astep, rescale_s - 1));
+    apply_leapfrog_drift(-.5 * dt * pow(astep, rescale_s - 1));
 
     meansvars(infrequent);
     scale(infrequent);
@@ -1483,7 +1488,7 @@ void save(int infrequent)
     }
 
     if (inflation_uses_staggered_derivatives() && t > 0.) // Desynchronize field values and derivatives
-    evolve_fields(.5 * dt * pow(astep, rescale_s - 1));
+    apply_leapfrog_drift(.5 * dt * pow(astep, rescale_s - 1));
 }
 
 // Write products that are defined only for the final inflationary state.
@@ -1852,7 +1857,7 @@ void histograms_post_inflation()
 void save_post_inflation(int infrequent)
 {
     if (post_inflation_uses_staggered_derivatives() && t > 0.) // Synchronize field values and derivatives
-    evolve_fields(-.5 * dt_post_inflation);
+    apply_leapfrog_drift(-.5 * dt_post_inflation);
 
     meansvars_post_inflation(infrequent);
     scale_post_inflation(infrequent);
@@ -1873,7 +1878,7 @@ void save_post_inflation(int infrequent)
     }
 
     if (post_inflation_uses_staggered_derivatives() && t > 0.) // Desynchronize field values and derivatives
-    evolve_fields(.5 * dt_post_inflation);
+    apply_leapfrog_drift(.5 * dt_post_inflation);
 }
 
 #endif

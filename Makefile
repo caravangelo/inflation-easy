@@ -1,15 +1,23 @@
 CXX      = c++
-CPPFLAGS =
+CPPFLAGS ?=
 CXXFLAGS = -std=c++17 -O3 -DNDEBUG -Wall
 LDFLAGS  =
 LIBS     = -lm
 ENABLE_NATIVE ?= 0
 ENABLE_LTO    ?= 0
 
-SRC_DIR = src
-SRCS    = $(wildcard $(SRC_DIR)/*.cpp)
-OBJS    = $(SRCS:$(SRC_DIR)/%.cpp=%.o)
-TARGET  = inflation_easy
+SRC_DIR       = src
+EVOLUTION_DIR = $(SRC_DIR)/evolution
+SOURCE_DIRS   = $(SRC_DIR) $(EVOLUTION_DIR)
+BUILD_DIR     = build
+CONFIG_STAMP  = $(BUILD_DIR)/.build_config
+
+SRCS   = $(foreach dir,$(SOURCE_DIRS),$(wildcard $(dir)/*.cpp))
+OBJS   = $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(SRCS))
+DEPS   = $(OBJS:.o=.d)
+TARGET = inflation_easy
+
+PROJECT_CPPFLAGS = -I$(SRC_DIR)
 
 # ---------- macOS exception: prefer Homebrew LLVM for OpenMP ----------
 UNAME_S := $(shell uname -s)
@@ -41,29 +49,52 @@ ifeq ($(ENABLE_LTO),1)
   LDFLAGS  += -flto
 endif
 
-.PHONY: all clean test test-spatial test-smoke test-sanitizers test-release dev-regression-main-n16
+.PHONY: all clean test test-spatial test-smoke test-sanitizers test-release dev-regression-main-n16 FORCE
 
 all: $(TARGET)
 
+# Rebuild when compiler or linker options change between make invocations.
+# The timestamp changes only when the effective configuration changes.
+FORCE:
+
+$(CONFIG_STAMP): FORCE
+	@mkdir -p $(dir $@)
+	@printf '%s\n' \
+	  'CXX=$(CXX)' \
+	  'PROJECT_CPPFLAGS=$(PROJECT_CPPFLAGS)' \
+	  'CPPFLAGS=$(CPPFLAGS)' \
+	  'CXXFLAGS=$(CXXFLAGS)' \
+	  'LDFLAGS=$(LDFLAGS)' \
+	  'LIBS=$(LIBS)' > $@.tmp
+	@if ! cmp -s $@.tmp $@; then mv $@.tmp $@; else rm -f $@.tmp; fi
+
+$(OBJS): $(CONFIG_STAMP) Makefile
+
 $(TARGET): $(OBJS)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
-	@rm -f $(OBJS)
 
-# Rebuild objects when shared headers change.
-%.o: $(SRC_DIR)/%.cpp $(SRC_DIR)/parameters.h $(SRC_DIR)/spatial_discretization.h $(SRC_DIR)/ffteasy.hpp $(SRC_DIR)/linear_metric.h
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+# Mirror the source tree under build/ and let the compiler track exact header
+# dependencies for both the top-level sources and the evolution subsystem.
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(PROJECT_CPPFLAGS) $(CPPFLAGS) $(CXXFLAGS) \
+	  -MMD -MP -MF $(@:.o=.d) -c $< -o $@
+
+-include $(DEPS)
 
 clean:
 	@echo "Cleaning build files..."
-	@rm -f $(OBJS) $(TARGET)
+	@rm -rf ./build
+	@rm -f ./inflation_easy
 
 # Verify the real-space operators and their Fourier eigenvalues for every
 # supported spatial order. The temporary executables are kept outside the tree.
 test-spatial:
 	@for order in 2 4 6; do \
 	  binary=$$(mktemp "/tmp/inflationeasy_spatial_test_$${order}.XXXXXX") || exit 1; \
-	  if ! $(CXX) $(CPPFLAGS) $(CXXFLAGS) -DSPATIAL_STENCIL_ORDER=$$order \
-	    -I$(SRC_DIR) tests/spatial_discretization_test.cpp -o $$binary $(LDFLAGS) $(LIBS); then \
+	  if ! $(CXX) $(PROJECT_CPPFLAGS) $(CPPFLAGS) $(CXXFLAGS) \
+	    -DSPATIAL_STENCIL_ORDER=$$order \
+	    tests/spatial_discretization_test.cpp -o $$binary $(LDFLAGS) $(LIBS); then \
 	    rm -f $$binary; exit 1; \
 	  fi; \
 	  if ! $$binary; then rm -f $$binary; exit 1; fi; \

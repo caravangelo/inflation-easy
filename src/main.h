@@ -149,14 +149,8 @@ void initializeN();
 void initialize_post_inflation();
 
 // Field evolution routines. The step argument is expressed in the active code-time variable.
-/// Advance the inflationary fields by one leapfrog drift.
-void evolve_fields(double d);
-/// Advance the inflationary field derivatives and scale-factor variables by one leapfrog kick.
-void evolve_derivs(double d);
-/// Advance the separate-universe fields by one leapfrog drift.
-void evolve_fieldsN(double d);
-/// Advance the separate-universe field derivatives by one leapfrog kick.
-void evolve_derivsN(double d);
+/// Advance the scalar, optional tensor, and scale-factor fields by one leapfrog drift.
+void apply_leapfrog_drift(double step_size);
 
 // Energy diagnostics.
 /// Return the box-averaged scalar gradient energy density in code units.
@@ -228,12 +222,12 @@ inline bool post_inflation_uses_staggered_derivatives() {
 
 // Main evolution drivers. Each owns the complete time loop for one simulation stage.
 /// Evolve the nonlinear inflationary lattice to the requested final scale factor.
-void run_evolution_loop(FILE* output_);
+void run_inflation_loop(FILE* output_log);
 #if perform_deltaN
 /// Evolve each lattice site as an independent homogeneous patch and construct deltaN.
-void run_deltaN_loop(FILE* output_);
+void run_deltaN_loop(FILE* output_log);
 #endif
 #if post_inflation
 /// Evolve the post-inflationary scalar and tensor systems.
-void run_post_inflation_loop(FILE* output_);
+void run_post_inflation_loop(FILE* output_log);
 #endif

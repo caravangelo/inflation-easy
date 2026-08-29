@@ -52,8 +52,7 @@ output_LOG = 0
 eta_log = -0.5
 
 # Post-inflation controls
-# Sets the initial Hubble scale relative to the lattice resolution; the default
-# places even the shortest resolved wavelengths well outside the Hubble horizon.
+# Sets the initial post-inflationary Hubble scale relative to the lattice resolution.
 horizon_factor = 1.0
 omega = 0.3333333333333333
 dt_post_inflation = 0.001

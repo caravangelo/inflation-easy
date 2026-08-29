@@ -112,9 +112,9 @@ def release_files(repo: Path) -> list[Path]:
         Path("params.analytic.txt"),
     )
     build_globs = (
-        "src/*.cpp",
-        "src/*.h",
-        "src/*.hpp",
+        "src/**/*.cpp",
+        "src/**/*.h",
+        "src/**/*.hpp",
         "inputs/*.dat",
     )
 

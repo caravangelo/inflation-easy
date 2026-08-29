@@ -12,6 +12,7 @@ __MACOSX/
 notebooks/.jupyter/
 
 # Ignore object files and build artifacts
+/build/
 *.o
 *.out
 *.log
