@@ -5,7 +5,7 @@
 
 **InflationEasy** is a lattice code specifically developed for cosmological inflation. It simulates the nonlinear dynamics of a scalar field on a three-dimensional lattice in an expanding FLRW universe using finite-difference spatial derivatives. Building on the well-known [LATTICEEASY](http://www.felderbooks.com/latticeeasy/) by Gary Felder and Igor Tkachev, the code incorporates several features tailored to inflationary applications, including a nonperturbative $\delta N$ calculation of the curvature perturbation $\zeta$, optional linear scalar metric corrections, and the calculation of scalar-induced gravitational waves generated during inflation and at subsequent horizon re-entry.
 
-More information is available in the associated publication: [arXiv:2506.11797](https://arxiv.org/abs/2506.11797). **Note:** The associated paper is currently under review. Version 1.1.1 includes features introduced after the current arXiv version, such as selectable higher-order spatial stencils and optional linear metric corrections. In case of discrepancies with the arXiv version, this documentation takes precedence.
+More information is available in the associated publication: [arXiv:2506.11797](https://arxiv.org/abs/2506.11797). **Note:** The associated paper is currently under review. The latest version includes features introduced after the current arXiv version, such as selectable higher-order spatial stencils and optional linear metric corrections. In case of discrepancies with the arXiv version, this documentation takes precedence.
 
 ## Key Features
 

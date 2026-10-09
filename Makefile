@@ -49,7 +49,7 @@ ifeq ($(ENABLE_LTO),1)
   LDFLAGS  += -flto
 endif
 
-.PHONY: all clean test test-spatial test-smoke test-sanitizers test-release dev-regression-main-n16 FORCE
+.PHONY: all clean test test-spatial test-inputs test-smoke test-sanitizers test-release dev-regression-main-n16 FORCE
 
 all: $(TARGET)
 
@@ -104,7 +104,10 @@ test-spatial:
 # Fast checks suitable for every push and pull request.
 test: test-spatial test-smoke
 
-test-smoke:
+test-inputs:
+	python3 tests/input_table_consistency.py --inputs inputs
+
+test-smoke: test-inputs
 	python3 tests/release_smoke.py --repo . --tier ci
 
 # Focused memory/undefined-behaviour checks for historically delicate outputs.
@@ -112,7 +115,7 @@ test-sanitizers:
 	python3 tests/release_smoke.py --repo . --tier sanitizers
 
 # Broader pre-tag matrix. This is intentionally separate from the fast CI tier.
-test-release:
+test-release: test-inputs
 	python3 tests/release_smoke.py --repo . --tier release
 
 # Compatibility alias for the former branch-vs-main check. The old comparison
