@@ -1,4 +1,29 @@
-// deltaN.cpp - Separate-universe evolution and curvature construction
+// deltaN.cpp - Nonperturbative deltaN computation of zeta
+//
+// After inflation, every lattice site is evolved as an independent homogeneous
+// universe (separate-universe approximation: gradients neglected), using its
+// local e-fold time N_loc (dN_loc = H_loc dt; the paper's calligraphic N):
+//
+//   d^2phi/dN_loc^2 = -[3 - (dphi/dN_loc)^2/2] [dphi/dN_loc + V_phi/V].
+//
+// V_phi/V does not depend on the normalization B. Each site is integrated until
+// it reaches the common constant-field slice phi = phiref; its counter
+// deltaN[id] then holds the local expansion N(n). saveN() (output.cpp) forms
+// zeta(n) = N(n) - <N> by subtracting the mean over the sites that finished.
+//
+// Variables in this stage: f = phi, fd = dphi/dN_loc (converted by
+// initializeN()), deltaN = accumulated N_loc (starting from 0). Ne is the
+// number of e-folds integrated by the loop (signed, |Ne| <= Nend) and dN the
+// signed step; the loop runs within the Nend budget and may leave a final
+// fraction unused. a and t are only bookkeeping here, and sites never interact.
+//
+// Stopping. A site is "active" until it crosses phiref; the test is selected
+// by monotonic_potential / antimonotonic_potential in parameters.h. Once a site
+// is inactive its phi and its counter are frozen; dphi/dN_loc is still updated
+// and remains in the RK45 error norm, but does not drive phi or its counter
+// while the site is inactive. Crossings are resolved to one step,
+// without interpolation. A constant-phi slice coincides with the
+// uniform-density slice only on an attractor (see the paper).
 
 #include "main.h"
 #include "evolution_internal.h"
@@ -23,6 +48,10 @@ namespace {
 // Potential on the selected final hypersurface, used by the generic stopping criterion.
 double reference_field_potential = 0.0;
 
+// True while the site has not yet reached the reference slice. Forward
+// trajectories are assumed to decrease |phi| (monotonic_potential), increase
+// |phi| (antimonotonic_potential), or otherwise decrease V. The inequalities
+// are reversed for backward integration (dN < 0).
 bool deltaN_patch_is_active_with_potential(
     double field_value, [[maybe_unused]] double potential_value)
 {
@@ -72,7 +101,7 @@ bool deltaN_patch_is_active(double field_value) {
 
 namespace {
 
-// Apply one leapfrog kick to the separate-universe velocity in e-fold time.
+// Leapfrog kick of dphi/dN_loc at every site (active or not).
 void apply_deltaN_leapfrog_kick(double step_size) {
     DECLARE_INDICES
 #if parallel_calculation
@@ -85,8 +114,7 @@ void apply_deltaN_leapfrog_kick(double step_size) {
     }
 }
 
-// Drift active separate-universe patches and accumulate their local expansion.
-// Sites freeze after crossing the selected final hypersurface.
+// Leapfrog drift: phi and the e-fold counter advance only at active sites.
 void apply_deltaN_leapfrog_drift(double step_size) {
     DECLARE_INDICES
     t += step_size;
@@ -129,8 +157,10 @@ struct DeltaNRKWorkspace {
     }
 };
 
-// Evaluate the separate-universe RHS in e-fold-time coordinates. ddNdt is one
-// before a patch reaches the final hypersurface and zero after it freezes.
+// RHS for one RK stage. Despite the historical "dt" names, slopes are with
+// respect to N_loc: dfdt = dphi/dN_loc and ddNdt = 1 at active sites, both 0
+// at inactive ones; dfddt is evaluated everywhere. Activity is tested at each
+// stage state.
 void compute_deltaN_rhs(
     const std::vector<double>& f_state,
     const std::vector<double>& fd_state,
@@ -266,7 +296,9 @@ void rk4_step_deltaN(double h, DeltaNRKWorkspace& workspace) {
     apply_deltaN_weighted_update(h, RK4_B, workspace, site_count, ka);
 }
 
-// Attempt one adaptive Dormand-Prince step with the shared RK45 error policy.
+// One Dormand-Prince 5(4) attempt. The error norm includes phi, dphi/dN_loc,
+// the e-fold counters and a; the step is accepted when the norm is <= 1, and
+// a rejected attempt leaves the state unchanged (see rk45_step_fields()).
 bool rk45_step_deltaN(
     double h, double hmax, double& h_next, DeltaNRKWorkspace& workspace)
 {
@@ -350,13 +382,14 @@ bool rk45_step_deltaN(
 
 namespace {
 
-// Select the automatically determined field value defining the final deltaN slice.
-// The serial scan is intentional because tie-breaking must remain deterministic.
+// Default phiref: the field value of the site that is furthest along the
+// forward trajectory, so every other site still has to reach it. Backward
+// runs (dN < 0) require a manual phiref.
 double select_automatic_reference_field() {
     DECLARE_INDICES
     double fref = f[idx(0,0,0)];
 
-    // Keep this reduction deterministic: fref selection depends on ordering.
+    // Serial scan: the selected value does not depend on thread ordering.
     LOOP {
 #if monotonic_potential
         if (std::abs(f[idx(i,j,k)]) < std::abs(fref))
@@ -373,7 +406,10 @@ double select_automatic_reference_field() {
 
 } // namespace
 
-// Run the complete separate-universe stage with the selected integrator.
+// Driver: convert the final inflationary state (initializeN()), choose phiref,
+// check that no site starts beyond it, integrate for |Ne| up to Nend, and call
+// saveN(). Sites that have not reached phiref are masked in the outputs, or
+// the run stops if the post-inflationary stage needs every site.
 void run_deltaN_loop(FILE* output_log) {
     printf("Starting deltaN calculation\n");
     fprintf(output_log, "Starting deltaN calculation\n");
@@ -401,6 +437,8 @@ void run_deltaN_loop(FILE* output_log) {
         return std::abs(dN) <= Nend - std::abs(Ne) + budget_tolerance;
     };
 
+    // The leapfrog starts with a half drift, undone at the end; skip it when
+    // the budget does not allow even one full step.
     const bool deltaN_state_is_staggered =
         deltaN_uses_staggered_derivatives() && fixed_step_fits_budget();
     if (deltaN_state_is_staggered) {

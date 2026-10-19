@@ -1,11 +1,14 @@
-// linear_metric.h - Linear scalar metric correction for inflaton evolution
+// linear_metric.h - Optional linear metric correction to the inflaton equation
+//
+// The paper adds a^2 Dm^2_metric (phi - <phi>) to the left-hand side of the
+// Klein-Gordon equation. In program variables this is the right-hand-side term
+// C (phi - <phi>) of the phi'' equation, with C = -a^(2-2s) Dm^2_metric / B^2.
 
 #pragma once
 
 #include <vector>
 
-// Quantities needed to add the linear metric mass shift to a lattice RHS.
-// rhs_coefficient is already expressed in the active code-time convention.
+// field_mean = <phi>; rhs_coefficient = C. Callers add C*(phi - <phi>) to phi''.
 struct LinearMetricCorrection {
     double field_mean = 0.0;
     double rhs_coefficient = 0.0;

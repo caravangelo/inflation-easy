@@ -32,8 +32,33 @@ The time-evolution implementation is grouped under `src/evolution/`:
 - `src/evolution/integrators.cpp` contains the leapfrog drift and the RK4/RK45 machinery shared by the inflationary and post-inflationary phases.
 - `src/evolution/deltaN.cpp` contains the separate-universe equations, stopping logic, and $\delta N$ control loop.
 - `src/evolution/post_inflation.cpp` contains the post-inflationary scalar and tensor equations and control loop.
-- `src/evolution/evolution_internal.h` declares the derivative wrappers and integration interfaces shared only within this subsystem.
+- `src/evolution/evolution_internal.h` documents the units, variables and time-level conventions shared by the evolution code, and declares the derivative wrappers and integration interfaces used only within this subsystem.
 - `src/evolution/linear_metric.cpp` and `src/evolution/linear_metric.h` implement the optional linear scalar metric correction from spatially averaged lattice quantities.
+
+## Reading the evolution code
+
+Start with the comment block at the top of `src/evolution/evolution_internal.h`. It lists the three stages and their drivers, the program variables (`x~ = B x`, `d tau~ = B a^s d tau`, `V~ = V/B^2`), the meaning of the global state in each stage, and the leapfrog/RK time-level conventions. Each file under `src/evolution/` then opens with the equations it implements, written in the notation of the paper.
+
+A run proceeds as follows:
+
+1. `initialize_simulation()` sets up the background and the vacuum fluctuations.
+2. `run_inflation_loop()` evolves the lattice until `a > af`. It calls the kernels in `inflation.cpp` through the leapfrog or the RK steppers in `integrators.cpp`; `save()` writes periodic outputs, and the loop synchronizes the leapfrog state before `save_last()` writes the end-of-inflation outputs.
+3. `run_deltaN_loop()` (optional) converts each site to e-fold time in `initializeN()`, integrates every site to `phiref`, and `saveN()` subtracts the mean local expansion to form zeta.
+4. `run_post_inflation_loop()` (optional) maps zeta to the Newtonian potential in `initialize_post_inflation()` and evolves the potential and the tensors.
+
+The table below links the equations of the manuscript to their implementation. Equation numbers refer to the resubmitted manuscript of 19 October 2026 (Overleaf commit `b327c71`) and may change in later versions; the source comments do not depend on them.
+
+| Manuscript equation | Implementation |
+| --- | --- |
+| Program variables, Eq. (13); equations of motion in program variables, Eq. (14) | `inflation.cpp`: `apply_inflation_leapfrog_kick()`, `compute_inflation_rhs()` |
+| Linear metric mass shift, Eq. (6), added as in Eq. (1) | `linear_metric.cpp`: `compute_linear_metric_correction()` |
+| Effective momentum, Eq. (12), and its higher-order versions | `spatial_discretization.h`: `effective_component_squared()` |
+| Constant-step rescaling `dt a^(s-1)` (Sec. 3.3) | `evolution.cpp`: `inflation_code_time_step()` |
+| Local e-fold equation, Eq. (21); zeta from N, Eq. (20) | `deltaN.cpp`: `compute_deltaN_rhs()`, `apply_deltaN_leapfrog_kick()`; `output.cpp`: `saveN()` |
+| Tensor equation with inflationary source, Eqs. (31), (39) | `inflation.cpp`: tensor part of both kernels |
+| Bardeen equation, Eq. (32); initial data, Eq. (33) | `post_inflation.cpp`; `initialize.cpp`: `initialize_post_inflation()` |
+| Post-inflationary source, Eq. (34) | `post_inflation.cpp` (the code accumulates `-S_ij` and multiplies by `-2`) |
+| TT projector, Eq. (41); spectra normalization, Eq. (35) | `output.cpp`: `write_gw_spectrum_impl()` |
 
 ## Numerical consistency
 

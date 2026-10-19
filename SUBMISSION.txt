@@ -1,0 +1,28 @@
+InflationEasy - CPC submission snapshot, 19 October 2026
+Identifier: cpc-2026-10-19
+
+This is the source package accompanying the resubmission of
+"InflationEasy: A C++ Lattice Code for Inflation" to Computer Physics
+Communications (previous manuscript reference COMPHY-D-26-00363R1).
+It is a review snapshot, not a new public release or Git tag.
+
+Baseline: v1.1.2, commit f1d2574124cb4be54f142a47dc80be850286e3f2.
+The numerical implementation, input tables and output formats are unchanged
+from that baseline. Source comments and the developer guide have been revised
+to explain the evolution stages, variables, units, approximations, numerical
+operators and diagnostics. Citation metadata identifies this snapshot.
+
+Start with README.md for installation and example runs. Build with make;
+run make test for spatial-operator, input-table and smoke checks. See the
+README for dependencies and optional notebooks. The MIT licence is in LICENSE.
+
+For the source documentation, start with src/evolution/evolution_internal.h,
+then src/evolution/evolution.cpp and the stage modules. DEVELOPER_GUIDE.md
+provides a navigation guide. Source comments are self-contained; its optional
+manuscript-equation table is tied to a specified manuscript revision.
+
+All 17 C++ source/header files were audited for identical executable tokens
+against v1.1.2. Earlier verification includes numerical equivalence, spatial,
+smoke, sanitizer and release checks; the author retains the detailed logs.
+The exact submission ZIP is identified by its accompanying SHA256SUMS.txt.
+Any later revision will be preserved as a separately identified snapshot.

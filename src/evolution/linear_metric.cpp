@@ -1,4 +1,10 @@
-// linear_metric.cpp - Linear scalar metric correction for inflaton evolution
+// linear_metric.cpp - Optional linear metric correction to the inflaton equation
+//
+// Linear scalar metric perturbations in spatially flat gauge shift the
+// effective mass of the inflaton fluctuations by (cosmic time t, M_Pl = 1)
+//     Dm^2_metric = -(1/a^3) d/dt [ a^3 phidot_bar^2 / H ],
+// with phi_bar identified with the lattice average <phi>. The lapse and shift
+// are not evolved; the correction assumes the metric perturbations stay linear.
 
 #include "linear_metric.h"
 
@@ -13,9 +19,11 @@ struct LinearMetricBackground {
     double deriv2_mean = 0.0;
 };
 
-// Construct the homogeneous quantities required by the metric mass shift from
-// spatial averages of the nonlinear lattice state. The mean acceleration is
-// evaluated with the homogeneous scalar equation in code-time variables.
+// Background quantities <phi>, <phi'> and <phi''> from the lattice state.
+// <phi''> follows from averaging the scalar equation over the box:
+//     <phi''> = -(2+s)(a'/a) <phi'> - a^(2-2s) <dV~/dphi>
+// (the Laplacian averages to zero; the force is averaged over sites rather
+// than evaluated at <phi>).
 LinearMetricBackground compute_background(
     const std::vector<double>& field,
     const std::vector<double>& field_derivative,
@@ -63,10 +71,12 @@ LinearMetricBackground compute_background(
 
 } // namespace
 
-// Leading scalar metric correction in spatially flat gauge. In physical
-// variables, Delta m^2 = -(1/a^3) d/dt [a^3 phidot_bar^2 / H], with M_Pl = 1.
-// The returned coefficient carries the sign and scale-factor conversion needed
-// for direct addition to the code-time field-acceleration RHS.
+// Returns <phi> and C = -a^(2-2s) Dm^2_metric / B^2. Writing Dm^2_metric in
+// program variables (phidot = B a^(s-1) phi', H = B a^(s-2) a') gives
+//     C = (s+3) <phi'>^2 + 2 <phi'><phi''> a/a' - <phi'>^2 a a''/a'^2.
+// a, a', a'' and the field data should refer to the same time. RK stages do;
+// the leapfrog kick passes the stored phi', half a step behind the fields.
+// Degenerate input (empty lattice, a <= 0 or a' = 0) gives C = 0.
 LinearMetricCorrection compute_linear_metric_correction(
     const std::vector<double>& field,
     const std::vector<double>& field_derivative,

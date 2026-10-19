@@ -1,9 +1,30 @@
-// spatial_discretization.h - Compile-time spatial finite differences
+// spatial_discretization.h - Finite-difference stencils and effective momenta
 //
-// This header keeps the real-space stencils and their Fourier eigenvalues in
-// one place. Selecting SPATIAL_STENCIL_ORDER in parameters.h consistently
-// changes the Laplacian, directional derivatives, initialization frequencies,
-// effective momenta, and tensor-projector wavevectors.
+// All spatial derivatives use centered periodic stencils of order
+// SPATIAL_STENCIL_ORDER = 2, 4 or 6 (parameters.h). Along one axis, with
+// f_m = f(x + m dx):
+//   order 2:  f'' = (f_1 - 2 f_0 + f_-1)/dx^2,
+//             f'  = (f_1 - f_-1)/(2 dx)
+//   order 4:  f'' = (-f_2 + 16 f_1 - 30 f_0 + 16 f_-1 - f_-2)/(12 dx^2),
+//             f'  = (-f_2 + 8 f_1 - 8 f_-1 + f_-2)/(12 dx)
+//   order 6:  f'' = (2 f_3 - 27 f_2 + 270 f_1 - 490 f_0 + ...)/(180 dx^2),
+//             f'  = (f_3 - 9 f_2 + 45 f_1 - 45 f_-1 + ...)/(60 dx)
+// The Laplacian is the sum of the three same-axis second derivatives.
+//
+// Effective momentum. On a Fourier mode with integer index n, the Laplacian
+// stencil has eigenvalue -k_eff^2, with, per axis,
+//   k_eff^2 = (4/dx^2) sin^2(pi n/N) [1 + sin^2(pi n/N)/3 (orders 4, 6)
+//                                       + 8 sin^4(pi n/N)/45 (order 6)].
+// This k_eff (the paper's modified dispersion relation) is used for the
+// initial mode frequencies, the momentum labels of all spectra and the GW TT
+// projector. The first-derivative stencils have a different Fourier symbol
+// (e.g. sin(2 pi n/N)/dx at order 2), so products of first derivatives match
+// the Laplacian only away from the lattice cutoff.
+//
+// Conventions: periodic boundaries; row-major storage with k fastest,
+// index(i,j,k) = (i N + j) N + k. laplacian() returns the stencil sum without
+// 1/dx^2; first_derivative(), second_derivative() and mixed_derivative()
+// include the spacing.
 
 #pragma once
 
@@ -56,8 +77,8 @@ inline int shifted(int coordinate, int offset) {
     return result;
 }
 
-// Dimensionless three-dimensional Laplacian. Callers apply dx^{-2} and any
-// scale-factor dependence required by the active equation of motion.
+// Three-dimensional Laplacian times dx^2 (callers divide by dx^2 and apply
+// the scale-factor factors of their equation).
 template <typename T>
 inline T laplacian(int i, int j, int k, const std::vector<T>& field) {
     if constexpr (order == 2) {
@@ -240,7 +261,7 @@ inline T mixed_derivative(
     }
 }
 
-// Positive eigenvalue of -d^2/dx^2 for one DFT component.
+// k_eff^2 of one axis for the signed mode index n (see file header).
 inline double effective_component_squared(int signed_mode, double spacing) {
     const double sine = std::sin(3.141592653589793238462643383279502884
                                * static_cast<double>(signed_mode) / static_cast<double>(N));
@@ -251,34 +272,39 @@ inline double effective_component_squared(int signed_mode, double spacing) {
     return 4.0 * sine2 * correction / (spacing * spacing);
 }
 
+// |k_eff|^2 of a three-dimensional mode: sum over the three axes.
 inline double effective_momentum_squared(int px, int py, int pz, double spacing) {
     return effective_component_squared(px, spacing)
          + effective_component_squared(py, spacing)
          + effective_component_squared(pz, spacing);
 }
 
-// Signed component used to construct the lattice-consistent TT projector.
+// Signed k_eff component, used to build the TT projector of the GW spectra.
 inline double effective_momentum_component(int signed_mode, double spacing) {
     const double magnitude = std::sqrt(effective_component_squared(signed_mode, spacing));
     return signed_mode < 0 ? -magnitude : magnitude;
 }
 
+// FFT index 0..N-1 -> signed mode index in (-N/2, N/2].
 inline int signed_mode(int fft_index) {
     return fft_index <= N / 2 ? fft_index : fft_index - N;
 }
 
+// Isotropic spectrum bin of a mode: |n| rounded to the nearest integer.
 inline int shell_index(int px, int py, int pz) {
     return static_cast<int>(std::lround(std::sqrt(
         static_cast<double>(px * px + py * py + pz * pz))));
 }
 
+// Largest per-axis k_eff^2 dx^2 (reached at the Nyquist mode, sin = 1).
 inline constexpr double one_dimensional_max_eigenvalue() {
     if constexpr (order == 2) return 4.0;
     if constexpr (order == 4) return 16.0 / 3.0;
     return 272.0 / 45.0;
 }
 
-// Leapfrog stability limit for the massless three-dimensional lattice wave equation.
+// Leapfrog stability limit for the massless lattice wave equation:
+// dt * k_eff,max <= 2, with k_eff,max^2 = 3 * max eigenvalue / dx^2.
 inline double courant_dt_over_dx_limit() {
     return 2.0 / std::sqrt(3.0 * one_dimensional_max_eigenvalue());
 }

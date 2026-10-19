@@ -1,4 +1,24 @@
-// post_inflation.cpp - Post-inflationary scalar and tensor evolution
+// post_inflation.cpp - Scalar-induced gravitational waves after inflation
+//
+// Variables: f = Phi (Newtonian potential), fd = Phi', a, ad = a', h_ij
+// (' = d/d tau~; see evolution_internal.h). The background is a perfect fluid
+// with constant equation of state w = omega, and the equations of the paper
+// read, in program variables,
+//
+//   a''    = [(1-3w)/2 - s] a'^2/a             (unaffected by Phi or h_ij),
+//   Phi''  = w a^(-2s) Laplacian(Phi) - [3(1+w) + s](a'/a) Phi'   (linear),
+//   h_ij'' = a^(-2s) Laplacian(h_ij) - (2+s)(a'/a) h_ij' + 2 a^(-2s) S_ij,
+//   S_ij   = -4 Phi d_i d_j Phi - 2 d_i Phi d_j Phi
+//            + 4/(3(1+w)) d_i U d_j U,      U = Phi'/H~ + Phi,  H~ = a'/a.
+//
+// Phi'/H~ takes the same value in tau and tau~. Sign convention: the code
+// accumulates source_ij = -S_ij and multiplies it by
+// POST_INFLATION_TENSOR_SOURCE_COEFFICIENT = -2, which gives the +2 S_ij above.
+//
+// Initial data (initialize_post_inflation() in initialize.cpp):
+// Phi = 3(1+w)/(5+3w) zeta, Phi' = 0, h_ij = h_ij' = 0, a = 1,
+// a' = horizon_factor * 2 pi N / L, and t = 0. The inflationary h_ij are not
+// carried over.
 
 #include "main.h"
 #include "evolution_internal.h"
@@ -9,8 +29,8 @@
 namespace {
 
 #if calculate_SIGW
-// Coefficient multiplying the Newtonian-gauge source in the tensor
-// normalization used by InflationEasy.
+// Multiplies source_ij = -S_ij (see file header), so that the tensor equation
+// receives +2 S_ij, with g_ij = a^2 [(1 - 2 Phi) delta_ij + h_ij].
 constexpr double POST_INFLATION_TENSOR_SOURCE_COEFFICIENT = -2.0;
 #endif
 
@@ -22,7 +42,8 @@ struct TensorSourceDerivatives {
     double newtonian_potential;
 };
 
-// Same-axis derivative for the active post-inflationary field state.
+// Periodic same-axis second derivative, INCLUDING dx^(-2); unlike the
+// dimensionless Laplacian stencil, this helper must not be divided by dx^2 again.
 inline double second_derivative_along_axis(
     int axis, int i, int j, int k, size_t id, const std::vector<double>& field)
 {
@@ -49,7 +70,7 @@ inline double second_derivative_along_axis(
     }
 }
 
-// Mixed second derivative for the active post-inflationary field state.
+// Periodic mixed derivative for distinct axes, INCLUDING dx^(-2).
 inline double mixed_second_derivative(
     int first_axis,
     int second_axis,
@@ -115,19 +136,21 @@ INFLATIONEASY_NOINLINE void compute_tensor_source_derivatives(
     derivatives.newtonian_potential = f[id];
 }
 
-// Apply one leapfrog kick to the post-inflationary scalar, background, and
-// optional tensor fields.
+// One leapfrog kick of Phi', a' and h_ij' (equations in the file header).
+// a'' is evaluated from the stored a' (it vanishes for radiation, w = 1/3,
+// with s = 0). The tensor source uses Phi at the kick time and the stored
+// Phi', which lags by half a step.
 void apply_post_inflation_leapfrog_kick(double step_size) {
     DECLARE_INDICES
 
     const double laplacian_coefficient = std::pow(a, -2.0 * rescale_s) / pw2(dx);
 
-    // Update second derivative of scale factor (ad2)
+    // a'' = [(1-3w)/2 - s] a'^2/a
     ad2 = - ( rescale_s - 0.5*(1.0 - 3.0*omega)) * pw2(ad) / a;
 
     ad += 0.5 * step_size * ad2;
 
-    // Scalar field evolution
+    // Scalar kick: linear Bardeen equation.
 #if parallel_calculation
 #pragma omp parallel for collapse(3)
 #endif
@@ -161,14 +184,15 @@ void apply_post_inflation_leapfrog_kick(double step_size) {
         TensorSourceDerivatives derivatives;
         compute_tensor_source_derivatives(i, j, k, derivatives);
 
-        // Construct the unprojected real-space sources.
+        // source_ij = -S_ij = 4 Phi d_i d_j Phi + 2 d_i Phi d_j Phi
+        //                     - 4/(3(1+w)) d_i U d_j U   (unprojected).
         const double newtonian_potential = derivatives.newtonian_potential;
 
         const double gx = derivatives.potential_gradient[0];
         const double gy = derivatives.potential_gradient[1];
         const double gz = derivatives.potential_gradient[2];
 
-        // Gradient of U = Phi'/H_code + Phi in the tensor source.
+        // Gradient of U = Phi'/H~ + Phi.
         const double grad_u_x =
             derivatives.velocity_gradient[0] * inverse_code_hubble + gx;
         const double grad_u_y =
@@ -268,8 +292,9 @@ void apply_post_inflation_leapfrog_kick(double step_size) {
 
 // -------------------- Main Post-Inflation Evolution Loop --------------------
 
-// Run the complete post-inflationary stage. RK modes reuse the shared field
-// integrator with the post-inflationary right-hand side selected explicitly.
+// Driver of the post-inflationary stage: initialize (see file header), then
+// step until a > af_post_inflation with the selected integrator, writing
+// outputs every output_freq steps. dt_post_inflation is a fixed step in tau~.
 void run_post_inflation_loop(FILE* output_log) {
     initialize_post_inflation();
 
@@ -365,7 +390,8 @@ void run_post_inflation_loop(FILE* output_log) {
 
 namespace evolution {
 
-// Evaluate the post-inflationary scalar, tensor, and background right-hand sides.
+// Right-hand side of the equations in the file header at one RK stage state.
+// Writes the slopes and does not modify the global fields.
 void compute_post_inflation_rhs(
     const std::vector<double>& f_state,
     const std::vector<double>& fd_state,
@@ -431,7 +457,7 @@ void compute_post_inflation_rhs(
         const double hessian_yz =
             mixed_second_derivative(1, 2, i, j, k, f_state);
 
-        // Gradient of U = Phi'/H_code + Phi in the tensor source.
+        // Gradient of U = Phi'/H~ + Phi.
         const double grad_u_x = gfdx * inverse_code_hubble + gx;
         const double grad_u_y = gfdy * inverse_code_hubble + gy;
         const double grad_u_z = gfdz * inverse_code_hubble + gz;

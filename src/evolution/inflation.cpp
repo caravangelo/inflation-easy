@@ -1,4 +1,24 @@
-// inflation.cpp - Inflationary equations, energy diagnostics, and leapfrog updates
+// inflation.cpp - Equations of the inflationary stage
+//
+// Variables: f = phi, fd = phi', a, ad = a' (' = d/d tau~; see
+// evolution_internal.h). The equations are those of the paper in program
+// variables:
+//
+//   phi''  = a^(-2s) Laplacian(phi) - (2+s)(a'/a) phi' - a^(2-2s) dV~/dphi
+//            [+ C (phi - <phi>) if linear_metric_perturbations = 1],
+//   a''    = a^(3-2s) (2 rho~_grad/3 + <V~>) - (s+1) a'^2/a,
+//   h_ij'' = a^(-2s) Laplacian(h_ij) - (2+s)(a'/a) h_ij'
+//            + 2 a^(-2s) S_ij,   S_ij = d_i phi d_j phi   (if calculate_SIGW).
+//
+// The scalar equation is fully nonlinear; the metric correction C (from
+// linear_metric.cpp) is the only linearized ingredient. rho~_grad =
+// <|grad phi|^2>/(2a^2) is gradient_energy(). The a'' equation is the paper's
+// a'' = -s a'^2/a + a^(3-2s) (<rho~> - 3<p~>)/6 after the kinetic energy has
+// been eliminated with the Friedmann constraint 3 a'^2 = a^(4-2s) <rho~>.
+// The tensors do not act back on phi or a.
+//
+// The same equations are implemented twice: apply_inflation_leapfrog_kick()
+// for the leapfrog and compute_inflation_rhs() for RK4/RK45.
 
 #include "main.h"
 #include "evolution_internal.h"
@@ -29,7 +49,9 @@ INFLATIONEASY_NOINLINE void compute_scalar_gradient(
 
 // -------------------- Energy Calculations --------------------
 
-// Compute gradient energy density (averaged)
+// rho~_grad = <|grad phi|^2>/(2a^2), in the units of V~. Uses the periodic
+// identity <|grad phi|^2> = -<phi Laplacian(phi)>, so the gradient energy is
+// the one consistent with the Laplacian stencil.
 double gradient_energy() {
     DECLARE_INDICES
     double gradient = 0.0;
@@ -38,7 +60,7 @@ double gradient_energy() {
     return 0.5 * gradient * norm / static_cast<double>(gridsize);
 }
 
-// Compute kinetic energy density (averaged)
+// Kinetic energy <(dphi/dt)^2>/(2 B^2) = a^(2s-2) <phi'^2>/2, in the units of V~.
 double kin_energy() {
     DECLARE_INDICES
     double deriv_energy = 0.0;
@@ -80,14 +102,18 @@ void apply_scalar_leapfrog_kick(
 
 // -------------------- Main Field Evolution --------------------
 
-// Apply a full leapfrog kick to the inflationary scalar, scale factor, and
-// optional tensor fields while preserving their staggered-time convention.
+// One leapfrog kick of length step_size: phi', h_ij' and a' advance by one
+// step using the fields at the current time (which lie halfway through the
+// velocity step).
 void evolution::apply_inflation_leapfrog_kick(double step_size) {
     const double laplacian_coefficient = std::pow(a, -2.0 * rescale_s) / pw2(dx);
     const double one_plus_rescale_s = rescale_s + 1.0;
     const double scale_factor_power = -2.0 * rescale_s + 2.0;
 
-    // Update second derivative of scale factor (ad2)
+    // a'' contains a'^2, so it is evaluated at the midpoint value
+    // a'_mid = a' + step*a''/2. Solving a'' = F - (s+1) a'_mid^2/a for a''
+    // gives the closed-form quadratic root below. a' then receives two half
+    // updates around the field kick, so the friction terms use a'_mid.
     ad2 = (-2.0 * ad - 2.0 * a / step_size / one_plus_rescale_s * (
     1.0 - std::sqrt(1.0 + 2.0 * step_size * one_plus_rescale_s * ad / a +
     pw2(step_size) * one_plus_rescale_s * std::pow(a, scale_factor_power) *
@@ -96,7 +122,8 @@ void evolution::apply_inflation_leapfrog_kick(double step_size) {
 
     ad += 0.5 * step_size * ad2;
 
-    // Scalar field evolution
+    // Scalar kick. The metric correction is evaluated with the stored phi',
+    // which, like the friction term, lags the fields by half a step.
     const double friction = (2.0 + rescale_s) * ad / a;
     const double potential_force_coefficient = std::pow(a, 2.0 - 2.0 * rescale_s);
     if (linear_metric_perturbations) {
@@ -112,7 +139,9 @@ void evolution::apply_inflation_leapfrog_kick(double step_size) {
     }
 
 #if calculate_SIGW
-    // Gravitational wave tensor evolution (store as float, compute RHS in double)
+    // Tensor kick for all six stored components (no TT projection), with
+    // S_ij = d_i phi d_j phi from centered first derivatives. Arithmetic is in
+    // double precision; h_ij and h_ij' are stored as float.
     const double tensor_source_prefactor = 2.0 * std::pow(a, -2.0 * rescale_s);
 
 #if parallel_calculation
@@ -190,7 +219,10 @@ void evolution::apply_inflation_leapfrog_kick(double step_size) {
 
 namespace evolution {
 
-// Evaluate the inflationary scalar, tensor, and background right-hand sides.
+// Right-hand side of the equations above at one RK stage state (f_state,
+// fd_state, h_state, hd_state, a_state, ad_state). Writes the slopes
+// (dfdt = phi', dfddt = phi'', ...) and does not modify the global fields;
+// only the interpolation hints of a tabulated potential are updated.
 void compute_inflation_rhs(
     const std::vector<double>& f_state,
     const std::vector<double>& fd_state,
@@ -304,6 +336,8 @@ void compute_inflation_rhs(
     const double gradient = 0.5 * gradient_sum * pw2(1.0 / (a_state * dx))
         / static_cast<double>(gridsize);
     const double potential_avg = potential_sum / static_cast<double>(gridsize);
+    // a'' as in the file header (kinetic energy eliminated via the
+    // Friedmann constraint).
     const double source = 2.0 * gradient / 3.0 + potential_avg;
 
     dadt = ad_state;

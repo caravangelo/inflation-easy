@@ -1,10 +1,23 @@
-// integrators.cpp - Shared leapfrog drift and RK4/RK45 stepping machinery
+// integrators.cpp - Time steppers shared by the inflationary and
+// post-inflationary stages
+//
+// - apply_leapfrog_drift(): the drift half of the leapfrog. The kicks contain
+//   the physics and live in inflation.cpp and post_inflation.cpp.
+// - rk4_step_fields(), rk45_step_fields(): classical RK4 and adaptive
+//   Dormand-Prince 5(4) for the coupled system (f, fd, a, ad and, if enabled,
+//   h_ij, h_ij'). The SimulationPhase argument selects the right-hand side.
+//
+// Step sizes h are in tau~ (evolution_internal.h). Stage states are built in
+// a FieldRKWorkspace, whose k arrays hold slopes (d/d tau~), not increments.
+// The global fields change only when a step is completed (RK4) or accepted
+// (RK45).
 
 #include "main.h"
 #include "evolution_internal.h"
 
-// Apply the leapfrog drift to all active fields and advance code time.
-// Inflationary and post-inflationary leapfrog loops share this operation.
+// Leapfrog drift: f, h_ij and a advance by step_size at fixed velocities, and
+// t advances. A drift of minus half a step synchronizes the fields with the
+// velocities (used before output); the caller decides whether to undo it.
 void apply_leapfrog_drift(double step_size) {
     DECLARE_INDICES
     t += step_size;
@@ -55,7 +68,8 @@ void FieldRKWorkspace::ensure_size(size_t site_count) {
 #endif
 }
 
-// Restrict a proposed adaptive step to the configured and stage-specific bounds.
+// Restrict the magnitude to configured/stage-specific bounds, preserving its
+// sign so the same policy supports backward e-fold integration in deltaN.
 double clamp_rk45_step(double h, double hmax) {
     const double hmin = std::max(1e-16, rk45_min_dt);
     const double hhi = std::max(hmin, hmax);
@@ -63,7 +77,9 @@ double clamp_rk45_step(double h, double hmax) {
     return direction * std::clamp(std::abs(h), hmin, hhi);
 }
 
-// Allow adaptive growth while keeping an accepted step near the requested base step.
+// Largest allowed RK45 step: twice the stage's fixed-step reference value,
+// within [rk45_min_dt, rk45_max_dt]. These two run-time bounds are applied in
+// each stage's own time variable (tau~, or e-folds in the deltaN stage).
 double rk45_hmax_from_base_step(double base_step) {
     return std::min(rk45_max_dt, std::max(rk45_min_dt, 2.0 * std::abs(base_step)));
 }
@@ -286,8 +302,11 @@ void rk4_step_fields(
     apply_weighted_state_update(h, RK4_B, workspace, site_count, ka, kad);
 }
 
-// Attempt one Dormand-Prince 5(4) step. Accepted candidates replace the global
-// state; rejected candidates leave it unchanged and return a smaller proposal.
+// Attempt one Dormand-Prince 5(4) step. If accepted, the 5th-order solution
+// replaces the global state and h_next is the proposed next step; if rejected,
+// the global state is unchanged and h_next is a smaller trial step. (RHS
+// evaluations may still update the interpolation hints of a tabulated
+// potential.)
 bool rk45_step_fields(
     double h,
     double hmax,
@@ -399,6 +418,9 @@ bool rk45_step_fields(
     const double sad = rk45_abs_tol + rk45_rel_tol * std::max(std::abs(ad), std::abs(ad5));
     err_acc += pw2(erra / sa) + pw2(errad / sad);
 
+    // Error is RMS over every evolved component, each scaled by
+    // abs_tol + rel_tol*max(|old|, |candidate|). DP_E is the 5th-minus-4th
+    // order estimate; exponent -1/5 controls the next proposed step.
     const double err_norm = std::sqrt(err_acc / static_cast<double>(nvars));
     const double safe_err = std::max(err_norm, 1e-16);
     double factor = rk45_safety * std::pow(safe_err, -0.2);

@@ -3,6 +3,12 @@
 // This file implements simulation I/O: parameter dumps, spectra, energy diagnostics,
 // and field snapshots written to the results/ directory.
 //
+// Units: outputs are converted from program variables (evolution/evolution_internal.h)
+// to reduced Planck units: momenta k = B k~, cosmic-time velocities
+// phidot = B a^(s-1) phi', and energies times B^2. Inflationary and
+// post-inflationary time columns are tau~; in deltaN outputs, t is only the
+// auxiliary counter described in evolution_internal.h.
+//
 // Output routines intentionally preserve the plain-text schema documented in the
 // manuscript and consumed by notebooks/plot.ipynb. Several FFT-based routines
 // transform global arrays in place and restore them before returning; callers must
@@ -45,8 +51,8 @@ void kill_mode(double *field, double *deriv)
     return;
 }
 
-// Average the selected Laplacian's effective momentum over the same DFT shells
-// and multiplicities used by all isotropic spectra.
+// Momentum label of each isotropic bin: the mean |k_eff| (spatial_discretization.h)
+// over the modes of the bin, converted to reduced Planck units (times B).
 static const std::vector<double>& effective_k_bin_centers()
 {
     static std::vector<double> centers;
@@ -95,11 +101,13 @@ static const std::vector<double>& effective_k_bin_centers()
 // real space and then call the common backend.
 //
 // Conventions:
-//   - Momentum bin index is the Euclidean norm of integer lattice wave numbers,
-//     rounded to the nearest integer. Bins outside the allocated range are
-//     ignored.
+//   - Modes are binned by the rounded norm of their integer wave vector; bins
+//     outside the allocated range are ignored. Each bin is labeled by its mean
+//     effective momentum (effective_k_bin_centers()).
 //   - The output for each bin is <|X_k|^2> averaged over the modes in that bin,
-//     multiplied by the caller-provided normalization factor.
+//     multiplied by the caller-provided normalization factor. Scalar callers
+//     use (L/B)^3/N^6, which for the unnormalized DFT X_k gives the continuum
+//     power spectrum P(k) (<X^2> = integral d^3k/(2pi)^3 P(k)).
 //
 // -----------------------------------------------------------------------------
 // Scalar power spectrum backend
@@ -109,9 +117,8 @@ static const std::vector<double>& effective_k_bin_centers()
 // (FFTW-style r2c, stored in the real array), with the Nyquist plane stored in
 // `nyquist_plane` (same convention as the rest of the code base).
 //
-// The output is an isotropically binned power spectrum P(k) ∝ <|X_k|^2>, where
-// bins are labeled by the rounded Euclidean norm of the integer lattice wave
-// numbers. The caller supplies the overall normalization.
+// Output columns: bin momentum (reduced Planck units), number of modes, and
+// norm1 * <|X_k|^2>.
 
 static void write_isotropic_spectrum_from_fft_r2c(
     FILE *out,
@@ -323,6 +330,8 @@ void scale(int flush)
         first = 0;
     }
 
+    // a'' as in evolution/inflation.cpp. Converted to cosmic time:
+    // H = B a^(s-2) a',  d^2a/dt^2 = B^2 a^(2s-2) [a'' + (s-1) a'^2/a].
     const double acceleration =
         std::pow(a, 3.0 - 2.0 * rescale_s)
         * (2.0 * gradient_energy() / 3.0 + potential_energy())
@@ -511,6 +520,13 @@ namespace {
     // Isotropically binned TT-projected spectrum over the shared output-shell range.
     // Output columns: comoving effective momentum (in reduced Planck units),
     // number of modes, and spectrum.
+    //
+    // For each mode: form the complex symmetric matrix h_lm(k) from the FFTs of
+    // the six components, project h^TT = P h P - (1/2) P Tr(P h) with
+    // P_ij = delta_ij - khat_i khat_j built from k_eff (the paper's Lambda
+    // projector), and accumulate sum_ij |h^TT_ij|^2. The factor 1/2 in norm1
+    // converts this polarization sum to the per-polarization P_h defined by
+    // <h^TT_ij h^TT_ij> = (2 pi)^3 delta(k + k') 2 P_h.
     static void write_gw_spectrum_impl(
         FILE *out,
         std::vector<float> (&h)[6],
@@ -687,7 +703,8 @@ void spectraGW()
 }
 
 
-// Write the TT-projected tensor-velocity spectrum in physical units during inflation.
+// Write the TT-projected tensor-velocity spectrum during inflation, using
+// dh/dt = B a^(s-1) h' (reduced Planck units).
 void spectraGWdot()
 {
     static FILE *fp = nullptr;
@@ -990,7 +1007,8 @@ void energy()
     fprintf(energy_, "\n");
     fflush(energy_);
 
-    // Energy conservation
+    // Friedmann check: 3 a^(2s-4) a'^2 / rho~ = 3 H^2/rho, equal to 1 for an
+    // exact solution.
     fprintf(conservation_, "%e %e %e\n",
     t, a, 3.0 * std::pow(a, 2.0 * rescale_s - 4.0) * pw2(ad) / (totalE));
     fflush(conservation_);

@@ -1,14 +1,19 @@
-// evolution.cpp - Inflationary evolution driver
+// evolution.cpp - Driver of the inflationary lattice stage
 //
-// The inflationary equations and leapfrog kernels are implemented in
-// inflation.cpp. Shared RK4/RK45 machinery lives in integrators.cpp.
+// run_inflation_loop() evolves the scalar field, the scale factor and the
+// optional tensors from the initial conditions until a > af, with the
+// integrator selected in params.txt, writing outputs every output_freq steps.
+// The equations are in inflation.cpp, the RK steppers in integrators.cpp, and
+// the variables and units are described in evolution_internal.h.
 
 #include "main.h"
 #include "evolution_internal.h"
 
 namespace {
 
-// Convert the configured inflationary step to the active code-time variable.
+// Convert the run-time step dt (an interval of B*t, t = cosmic time) into a
+// step in tau~: d tau~ = dt * a^(s-1), with a taken at the end of the previous
+// step (astep).
 inline double inflation_code_time_step(double scale_factor_at_step_start) {
     return dt * std::pow(scale_factor_at_step_start, rescale_s - 1.0);
 }
@@ -43,7 +48,9 @@ void run_inflation_loop(FILE* output_log) {
 
     switch (integrator) {
         case INTEGRATOR_LEAPFROG: {
-            apply_leapfrog_drift(0.5 * dt); // First leapfrog half-step
+            // Initial half drift puts the fields half a step ahead of the
+            // velocities (a = 1 here, so dt*a^(s-1) = dt).
+            apply_leapfrog_drift(0.5 * dt);
 
             while (a <= af) {
                 const double code_time_step = inflation_code_time_step(astep);
@@ -72,6 +79,8 @@ void run_inflation_loop(FILE* output_log) {
         }
         case INTEGRATOR_RK45:
         default: {
+            // Adaptive steps; the fixed-step value dt*a^(s-1) serves as the
+            // reference scale that bounds the step (rk45_hmax_from_base_step).
             double h = evolution::clamp_rk45_step(
                 inflation_code_time_step(astep), rk45_max_dt);
 
@@ -113,7 +122,8 @@ void run_inflation_loop(FILE* output_log) {
     fflush(output_log);
     save(1);
     if (inflation_uses_staggered_derivatives()) {
-        // Temporarily align the staggered field and velocity states for output.
+        // Align fields with velocities for save_last() and the following stage.
+        // This final half drift is not undone; ordinary save() restores staggering.
         apply_leapfrog_drift(-0.5 * inflation_code_time_step(astep));
     }
     save_last();

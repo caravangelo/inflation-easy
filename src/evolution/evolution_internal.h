@@ -1,8 +1,52 @@
-// evolution_internal.h - Private interfaces shared by the evolution stages
+// evolution_internal.h - Conventions and private interfaces of src/evolution/
 //
-// This header is internal to the C++ implementation. It keeps the public
-// declarations in main.h small while allowing the evolution stages to share
-// derivative helpers, RK coefficients, and integration interfaces.
+// Start here when reading the evolution code. The run has three stages:
+//   1. inflation       run_inflation_loop()       evolution.cpp, inflation.cpp
+//   2. deltaN          run_deltaN_loop()          deltaN.cpp       (optional)
+//   3. post-inflation  run_post_inflation_loop()  post_inflation.cpp (optional)
+// integrators.cpp holds the leapfrog drift and the RK4/RK45 steppers shared by
+// stages 1 and 3; linear_metric.cpp holds the optional metric correction of
+// stage 1. initializeN() and initialize_post_inflation() (initialize.cpp)
+// prepare the data for stages 2 and 3.
+//
+// Units and variables (notation of the paper). Reduced Planck units, M_Pl = 1,
+// so the field is phi/M_Pl. As in LATTICEEASY, the code uses the program
+// variables
+//     x~ = B x,    d tau~ = B a^s d tau,    V~ = V / B^2,
+// where tau is conformal time, B = rescale_B and s = rescale_s (default 0).
+// L and dx are in x~ units. In comments a prime denotes d/d tau~, and
+// "Laplacian" means d^2/dx~^2 as approximated by the selected stencil.
+// Outputs are converted back to reduced Planck units.
+//
+// Time steps. The run-time dt is a step in B*t (t: cosmic time). Because
+// d tau~ = B a^(s-1) dt, fixed-step inflation uses dt*a^(s-1) in tau~,
+// evaluating a at the start of each step. RK45 uses this as a reference for
+// adaptive steps, not a fixed cosmic-time interval. dt_post_inflation is a
+// step in tau~; the deltaN stage steps in local e-folds (dN).
+//
+// Global state (declared in main.h):
+//   t          tau~ (in the deltaN stage it is only a running counter)
+//   a, ad      scale factor and a';  ad2 = a'' (leapfrog bookkeeping)
+//   astep      a at the end of the previous step; sets the next step size
+//   f, fd      inflation:      phi and phi'
+//              deltaN:         phi and dphi/dN_loc (N_loc: local e-folds)
+//              post-inflation: Newtonian potential Phi and Phi'
+//   hij, hijd  the six components of h_ij and h_ij', defined by
+//              ds^2 = a^2 [-d tau^2 + (delta_ij + h_ij) dx^i dx^j]
+//              and packed as [xx, yy, zz, xy, xz, yz] (sym_idx() in main.h).
+//              All six are evolved without projection; output.cpp applies
+//              the transverse-traceless (TT) projection to the spectra.
+//   deltaN     accumulated local e-folds N(n) per site (zeta after saveN())
+//   Ne, dN, Nend, phiref
+//              deltaN loop: e-folds integrated so far, signed step, maximum
+//              |Ne|, and field value of the final constant-phi slice
+//   omega      post-inflationary equation of state w
+//
+// Time levels. RK4/RK45 keep fields and velocities at the same time. The
+// leapfrog stores fields half a step ahead of velocities: a "kick" advances
+// velocities using the fields, a "drift" advances fields at fixed velocity.
+// save() and the end of run_inflation_loop() drift the fields back by half a
+// step whenever synchronized values are needed.
 
 #pragma once
 
@@ -27,8 +71,10 @@
 namespace evolution {
 
 #if calculate_SIGW || post_inflation
-// First derivative in code units. The explicit order-2 branch preserves the
-// original default hot path; higher orders use the selected spatial stencil.
+// Periodic derivative along axis 0/1/2 = x/y/z, INCLUDING 1/dx. In contrast,
+// spatial::laplacian() omits 1/dx^2, which its callers must supply.
+// The order-2 branch preserves the default hot path; higher orders use the
+// selected spatial stencil.
 template <typename T>
 inline T first_spatial_derivative(
     int axis, int i, int j, int k, const std::vector<T>& field)
@@ -92,8 +138,12 @@ struct RK45StepResult {
 constexpr int RK45_MAX_ATTEMPTS = 25;
 constexpr double RK45_MIN_STEP_GUARD = 1.0 + 1e-12;
 
-// Shared accept/reject driver. step_function leaves the state unchanged after
-// rejection; failure_handler terminates or otherwise resolves a stalled step.
+// Accept/reject loop shared by all RK45 drivers. step_function(h, hmax, h_next)
+// attempts one step and returns true if it was accepted; after a rejection the
+// evolved state is unchanged and h_next is a smaller trial step.
+// failure_handler is called when the step cannot shrink further or too many
+// attempts failed; the drivers abort the run there. Returns the accepted step
+// and the proposed next step, both signed (backward deltaN runs use h < 0).
 template <typename StepFunction, typename FailureHandler>
 RK45StepResult rk45_accept_step(
     double h,
@@ -120,8 +170,10 @@ RK45StepResult rk45_accept_step(
     return {accepted_h, h};
 }
 
-// Compile-time-visible Runge--Kutta coefficients. The field and deltaN
-// integrators share these tables, while each retains its own state layout.
+// Butcher tables of the Dormand-Prince 5(4) pair and of classical RK4, shared
+// by the field and deltaN integrators. DP_B are the 5th-order weights used to
+// advance the solution; DP_E = (5th - 4th order weights) gives the error
+// estimate.
 struct DormandPrince45Coefficients {
     static constexpr double a21 = 1.0 / 5.0;
     static constexpr double a31 = 3.0 / 40.0;
@@ -229,10 +281,12 @@ inline constexpr double DP_E[7] = {
     DormandPrince45Coefficients::e7
 };
 
+// RK45 step-size limits (see integrators.cpp).
 double clamp_rk45_step(double h, double hmax);
 double rk45_hmax_from_base_step(double base_step);
 
-// Inflationary leapfrog kick and Runge--Kutta right-hand side.
+// Inflationary equations (inflation.cpp): one leapfrog kick, and the RHS
+// evaluated on an RK stage state.
 void apply_inflation_leapfrog_kick(double step_size);
 
 void compute_inflation_rhs(
@@ -254,7 +308,7 @@ void compute_inflation_rhs(
     double& daddt);
 
 #if post_inflation
-// Post-inflationary Runge--Kutta right-hand side.
+// Post-inflationary RHS evaluated on an RK stage state (post_inflation.cpp).
 void compute_post_inflation_rhs(
     const std::vector<double>& f_state,
     const std::vector<double>& fd_state,
@@ -274,7 +328,8 @@ void compute_post_inflation_rhs(
     double& daddt);
 #endif
 
-// Shared fixed-step and adaptive field integrators.
+// Shared RK4 / RK45 steppers for stages 1 and 3 (integrators.cpp). h is a
+// step in tau~; phase selects which right-hand side is used.
 void rk4_step_fields(
     double h,
     FieldRKWorkspace& workspace,

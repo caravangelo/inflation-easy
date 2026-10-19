@@ -2,8 +2,8 @@ cff-version: 1.2.0
 title: InflationEasy
 message: "If you use this software, please cite it using the metadata below."
 type: software
-version: "1.1.2"
-date-released: "2026-10-09"
+# Submission snapshot identifier; no public release has been made.
+version: "cpc-2026-10-19"
 authors:
   - family-names: Caravano
     given-names: Angelo

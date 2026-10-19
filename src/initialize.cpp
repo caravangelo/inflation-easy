@@ -250,8 +250,11 @@ void initializef() {
 // -------------------- DeltaN Initialization --------------------
 
 #if perform_deltaN
-// Prepare the separate-universe variables at every lattice site. The velocity
-// is converted from code time to e-fold time before the deltaN loop begins.
+// Prepare the deltaN stage. At each site the velocity phi' is converted to
+// dphi/dN_loc = phidot/H_loc, with the local Friedmann equation of a
+// homogeneous patch (gradients neglected; no box-averaged H is used):
+//     phidot/B = a^(s-1) phi',   (H_loc/B)^2 = [(phidot/B)^2/2 + V~(phi)]/3.
+// The e-fold counters deltaN start from zero.
 void initializeN() {
     DECLARE_INDICES
     deltaN.resize(N * N * N, 0.0);
@@ -307,8 +310,8 @@ void initializeGW() {
 #endif
 
 #if post_inflation
-// Map the final inflationary scalar data to the Newtonian-potential initial
-// condition used by the post-inflationary perfect-fluid evolution.
+// Initial data of the post-inflationary stage: Phi = 3(1+w)/(5+3w) zeta,
+// Phi' = 0, h_ij = h_ij' = 0, a = 1 (see post_inflation.cpp).
 void initialize_post_inflation() {
 
     t0 = 0.0;
@@ -323,6 +326,7 @@ void initialize_post_inflation() {
     DECLARE_INDICES
 
 #if perform_deltaN
+    // zeta = N - <N> from the deltaN stage.
     double Nmean = 0.;
     LOOP
     Nmean += deltaN[idx(i,j,k)];
@@ -331,6 +335,8 @@ void initialize_post_inflation() {
     LOOP f[idx(i,j,k)] = Phi_from_zeta * (deltaN[idx(i,j,k)] - Nmean);
 
 #else
+    // Without deltaN, use the linear relation zeta_lin = -H delta phi / phidot,
+    // with delta phi = phi - <phi> and phidot/H = <phi'> a/a'.
     double fmean = 0.0;
     double fdmean = 0.0;
     LOOP
@@ -361,7 +367,7 @@ void initialize_post_inflation() {
 
 #endif
 
-    // The perfect-fluid evolution starts from a constant Newtonian potential.
+    // Phi' = 0: the non-decaying super-Hubble mode.
     fd.assign(gs, 0.0);
 
     a = 1.0;
