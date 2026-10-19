@@ -2,7 +2,7 @@
 //
 // After inflation, every lattice site is evolved as an independent homogeneous
 // universe (separate-universe approximation: gradients neglected), using its
-// local e-fold time N_loc (dN_loc = H_loc dt; the paper's calligraphic N):
+// local e-fold time N_loc (dN_loc = H_loc dt), denoted N in the paper:
 //
 //   d^2phi/dN_loc^2 = -[3 - (dphi/dN_loc)^2/2] [dphi/dN_loc + V_phi/V].
 //
