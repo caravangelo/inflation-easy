@@ -293,8 +293,9 @@ void apply_post_inflation_leapfrog_kick(double step_size) {
 // -------------------- Main Post-Inflation Evolution Loop --------------------
 
 // Driver of the post-inflationary stage: initialize (see file header), then
-// step until a > af_post_inflation with the selected integrator, writing
-// outputs every output_freq steps. dt_post_inflation is a fixed step in tau~.
+// evolve to the target scale factor af_post_inflation, stopping at the first
+// step beyond that target. Use the selected integrator and write outputs every
+// output_freq steps. dt_post_inflation is a fixed step in tau~.
 void run_post_inflation_loop(FILE* output_log) {
     initialize_post_inflation();
 

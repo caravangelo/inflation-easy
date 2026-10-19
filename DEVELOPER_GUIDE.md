@@ -42,7 +42,7 @@ Start with the comment block at the top of `src/evolution/evolution_internal.h`.
 A run proceeds as follows:
 
 1. `initialize_simulation()` sets up the background and the vacuum fluctuations.
-2. `run_inflation_loop()` evolves the lattice until `a > af`. It calls the kernels in `inflation.cpp` through the leapfrog or the RK steppers in `integrators.cpp`; `save()` writes periodic outputs, and the loop synchronizes the leapfrog state before `save_last()` writes the end-of-inflation outputs.
+2. `run_inflation_loop()` evolves the lattice to the target scale factor `af`, stopping at the first step beyond it. It calls the kernels in `inflation.cpp` through the leapfrog or the RK steppers in `integrators.cpp`; `save()` writes periodic outputs, and the loop synchronizes the leapfrog state before `save_last()` writes the end-of-inflation outputs.
 3. `run_deltaN_loop()` (optional) converts each site to e-fold time in `initializeN()`, integrates every site to `phiref`, and `saveN()` subtracts the mean local expansion to form zeta.
 4. `run_post_inflation_loop()` (optional) maps zeta to the Newtonian potential in `initialize_post_inflation()` and evolves the potential and the tensors.
 

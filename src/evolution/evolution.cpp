@@ -1,8 +1,9 @@
 // evolution.cpp - Driver of the inflationary lattice stage
 //
 // run_inflation_loop() evolves the scalar field, the scale factor and the
-// optional tensors from the initial conditions until a > af, with the
-// integrator selected in params.txt, writing outputs every output_freq steps.
+// optional tensors from the initial conditions to the target scale factor af,
+// stopping at the first step beyond that target. The integrator is selected
+// in params.txt; outputs are written every output_freq steps.
 // The equations are in inflation.cpp, the RK steppers in integrators.cpp, and
 // the variables and units are described in evolution_internal.h.
 
