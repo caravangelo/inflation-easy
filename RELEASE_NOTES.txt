@@ -1,0 +1,11 @@
+InflationEasy v1.1.3 - source documentation improvements
+
+This release improves the source documentation of the inflationary,
+separate-universe delta-N and post-inflationary evolution modules, and the
+core initialization, spatial-discretization and output routines. Comments
+explain variables, units, approximations, time conventions, numerical
+operators and normalization without depending on manuscript equation numbers.
+The developer guide adds a reading order and a versioned equation-to-code map.
+
+Numerical algorithms, input tables and output formats are unchanged from
+v1.1.2. This release also updates the citation metadata to v1.1.3.
