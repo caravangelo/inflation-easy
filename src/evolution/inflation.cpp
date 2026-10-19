@@ -1,8 +1,8 @@
 // inflation.cpp - Equations of the inflationary stage
 //
 // Variables: f = phi, fd = phi', a, ad = a' (' = d/d tau~; see
-// evolution_internal.h). The equations are those of the paper in program
-// variables:
+// evolution_internal.h). The equations are those of the paper in code
+// units:
 //
 //   phi''  = a^(-2s) Laplacian(phi) - (2+s)(a'/a) phi' - a^(2-2s) dV~/dphi
 //            [+ C (phi - <phi>) if linear_metric_perturbations = 1],

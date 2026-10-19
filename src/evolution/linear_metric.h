@@ -1,7 +1,7 @@
 // linear_metric.h - Optional linear metric correction to the inflaton equation
 //
 // The paper adds a^2 Dm^2_metric (phi - <phi>) to the left-hand side of the
-// Klein-Gordon equation. In program variables this is the right-hand-side term
+// Klein-Gordon equation. In code units this is the right-hand-side term
 // C (phi - <phi>) of the phi'' equation, with C = -a^(2-2s) Dm^2_metric / B^2.
 
 #pragma once

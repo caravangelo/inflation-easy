@@ -3,7 +3,7 @@
 // Variables: f = Phi (Newtonian potential), fd = Phi', a, ad = a', h_ij
 // (' = d/d tau~; see evolution_internal.h). The background is a perfect fluid
 // with constant equation of state w = omega, and the equations of the paper
-// read, in program variables,
+// read, in code units,
 //
 //   a''    = [(1-3w)/2 - s] a'^2/a             (unaffected by Phi or h_ij),
 //   Phi''  = w a^(-2s) Laplacian(Phi) - [3(1+w) + s](a'/a) Phi'   (linear),

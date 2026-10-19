@@ -37,7 +37,7 @@ The time-evolution implementation is grouped under `src/evolution/`:
 
 ## Reading the evolution code
 
-Start with the comment block at the top of `src/evolution/evolution_internal.h`. It lists the three stages and their drivers, the program variables (`x~ = B x`, `d tau~ = B a^s d tau`, `V~ = V/B^2`), the meaning of the global state in each stage, and the leapfrog/RK time-level conventions. Each file under `src/evolution/` then opens with the equations it implements, written in the notation of the paper.
+Start with the comment block at the top of `src/evolution/evolution_internal.h`. It lists the three stages and their drivers, the code units (`x~ = B x`, `d tau~ = B a^s d tau`, `V~ = V/B^2`), the meaning of the global state in each stage, and the leapfrog/RK time-level conventions. Each file under `src/evolution/` then opens with the equations it implements, written in the notation of the paper.
 
 A run proceeds as follows:
 
@@ -46,11 +46,11 @@ A run proceeds as follows:
 3. `run_deltaN_loop()` (optional) converts each site to e-fold time in `initializeN()`, integrates every site to `phiref`, and `saveN()` subtracts the mean local expansion to form zeta.
 4. `run_post_inflation_loop()` (optional) maps zeta to the Newtonian potential in `initialize_post_inflation()` and evolves the potential and the tensors.
 
-The table below links the equations of the manuscript to their implementation. Equation numbers refer to the resubmitted manuscript of 19 October 2026 (Overleaf commit `b327c71`) and may change in later versions; the source comments do not depend on them.
+The table below links the equations of the manuscript to their implementation. Equation numbers refer to the resubmitted manuscript of 19 October 2026 (Overleaf commit `eb2e200`) and may change in later versions; the source comments do not depend on them.
 
 | Manuscript equation | Implementation |
 | --- | --- |
-| Program variables, Eq. (13); equations of motion in program variables, Eq. (14) | `inflation.cpp`: `apply_inflation_leapfrog_kick()`, `compute_inflation_rhs()` |
+| Code units, Eq. (13); equations of motion in code units, Eq. (14) | `inflation.cpp`: `apply_inflation_leapfrog_kick()`, `compute_inflation_rhs()` |
 | Linear metric mass shift, Eq. (6), added as in Eq. (1) | `linear_metric.cpp`: `compute_linear_metric_correction()` |
 | Effective momentum, Eq. (12), and its higher-order versions | `spatial_discretization.h`: `effective_component_squared()` |
 | Constant-step rescaling `dt a^(s-1)` (Sec. 3.3) | `evolution.cpp`: `inflation_code_time_step()` |

@@ -72,7 +72,7 @@ LinearMetricBackground compute_background(
 } // namespace
 
 // Returns <phi> and C = -a^(2-2s) Dm^2_metric / B^2. Writing Dm^2_metric in
-// program variables (phidot = B a^(s-1) phi', H = B a^(s-2) a') gives
+// code units (phidot = B a^(s-1) phi', H = B a^(s-2) a') gives
 //     C = (s+3) <phi'>^2 + 2 <phi'><phi''> a/a' - <phi'>^2 a a''/a'^2.
 // a, a', a'' and the field data should refer to the same time. RK stages do;
 // the leapfrog kick passes the stored phi', half a step behind the fields.

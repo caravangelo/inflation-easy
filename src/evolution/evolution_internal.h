@@ -10,8 +10,8 @@
 // prepare the data for stages 2 and 3.
 //
 // Units and variables (notation of the paper). Reduced Planck units, M_Pl = 1,
-// so the field is phi/M_Pl. As in LATTICEEASY, the code uses the program
-// variables
+// so the field is phi/M_Pl. As in LATTICEEASY, the evolution uses code units,
+// defined by the rescaled variables
 //     x~ = B x,    d tau~ = B a^s d tau,    V~ = V / B^2,
 // where tau is conformal time, B = rescale_B and s = rescale_s (default 0).
 // L and dx are in x~ units. In comments a prime denotes d/d tau~, and

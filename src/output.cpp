@@ -3,7 +3,7 @@
 // This file implements simulation I/O: parameter dumps, spectra, energy diagnostics,
 // and field snapshots written to the results/ directory.
 //
-// Units: outputs are converted from program variables (evolution/evolution_internal.h)
+// Units: outputs are converted from code units (evolution/evolution_internal.h)
 // to reduced Planck units: momenta k = B k~, cosmic-time velocities
 // phidot = B a^(s-1) phi', and energies times B^2. Inflationary and
 // post-inflationary time columns are tau~; in deltaN outputs, t is only the
