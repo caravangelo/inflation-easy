@@ -46,7 +46,7 @@ A run proceeds as follows:
 3. `run_deltaN_loop()` (optional) converts each site to e-fold time in `initializeN()`, integrates every site to `phiref`, and `saveN()` subtracts the mean local expansion to form zeta.
 4. `run_post_inflation_loop()` (optional) maps zeta to the Newtonian potential in `initialize_post_inflation()` and evolves the potential and the tensors.
 
-The table below links the equations of the manuscript to their implementation. Equation numbers refer to the resubmitted manuscript of 19 October 2026 (Overleaf commit `eb2e200`) and may change in later versions; the source comments do not depend on them.
+The table below links the equations of the manuscript to their implementation. Equation numbers refer to the resubmitted manuscript of 19 October 2026 (Overleaf commit `ef83d27`) and may change in later versions; the source comments do not depend on them.
 
 | Manuscript equation | Implementation |
 | --- | --- |
