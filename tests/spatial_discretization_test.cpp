@@ -58,7 +58,7 @@ int main() {
     }
 
     const double qx = first_derivative_wave_number(mx, spacing);
-    const double qy = first_derivative_wave_number(my, spacing);
+
     const double dx_field = spatial::first_derivative(0, i, j, k, field, spacing);
     if (!close(dx_field, -qx * std::sin(phase))) {
         std::fprintf(stderr, "order %d: first derivative mismatch\n", spatial::order);
@@ -72,10 +72,17 @@ int main() {
         return 1;
     }
 
-    const double dxy_field = spatial::mixed_derivative(0, 1, i, j, k, field, spacing);
-    if (!close(dxy_field, -qx * qy * value)) {
-        std::fprintf(stderr, "order %d: mixed derivative mismatch\n", spatial::order);
-        return 1;
+    const double q[] = {qx, first_derivative_wave_number(my, spacing),
+                        first_derivative_wave_number(mz, spacing)};
+    for (int first = 0; first < 3; ++first) {
+        for (int second = first + 1; second < 3; ++second) {
+            const double mixed = spatial::mixed_derivative(first, second, i, j, k, field, spacing);
+            if (!close(mixed, -q[first] * q[second] * value)) {
+                std::fprintf(stderr, "order %d: mixed derivative mismatch for axes %d,%d\n",
+                             spatial::order, first, second);
+                return 1;
+            }
+        }
     }
 
     // High-momentum endpoint of Fig. 9 in Appendix C of arXiv:2102.06378,
