@@ -52,9 +52,14 @@ void run_inflation_loop(FILE* output_log) {
             // Initial half drift puts the fields half a step ahead of the
             // velocities (a = 1 here, so dt*a^(s-1) = dt).
             apply_leapfrog_drift(0.5 * dt);
+            double previous_step = dt;
 
             while (a <= af) {
                 const double code_time_step = inflation_code_time_step(astep);
+                // The step changes with a: shift the fields so that they stay
+                // half of the current step ahead of the velocities.
+                apply_leapfrog_drift(0.5 * (code_time_step - previous_step));
+                previous_step = code_time_step;
                 evolution::apply_inflation_leapfrog_kick(code_time_step);
                 apply_leapfrog_drift(code_time_step);
 
