@@ -41,7 +41,7 @@ int find_bracketing_index(double field_value, int start_index) {
     }
 
     int l = std::clamp(start_index, 1, n - 1);
-    while (l < n && field_numerical[l] >= field_value) ++l;
+    while (l < n - 1 && field_numerical[l] >= field_value) ++l;
     while (l > 1 && field_numerical[l - 1] < field_value) --l;
 
     if (l <= 0 || l >= n) {
