@@ -75,11 +75,11 @@ void initialize_simulation() {
 
 // -------------------- Field Mode Initialization --------------------
 // Draw one Gaussian vacuum mode in the packed complex FFT layout. `p2` is the
-// lattice-dispersion momentum used in omega, while `p2lat` labels the DFT mode
+// lattice-dispersion momentum used in omega, while the DFT index radius is
 // used by the optional spectral cutoffs. `real` enforces a self-conjugate mode.
 void set_mode(
     double p2,
-    double p2lat,
+    double radius_squared,
     const std::optional<double>& mass_squared,
     double *field,
     double *deriv,
@@ -88,7 +88,6 @@ void set_mode(
     double phase, amplitude, rms_amplitude, omega;
     double re_f_left, im_f_left;
     static double norm = rescale_B * pow(L / pw2(dx), 1.5); // Normalization (see 2209.13616)
-    double ii = L / (2.0 * pi) * sqrt(p2lat);
     static double hbterm = -hubble_init;
     static int tachyonic = 0;
 
@@ -104,7 +103,7 @@ void set_mode(
     rms_amplitude = (omega > 0.0) ? norm / sqrt(2.0 * omega) : 0.0;
 
     // Apply high/low frequency cutoff
-    if (high_cutoff_index > 0 && (ii > high_cutoff_index || ii < low_cutoff_index)) {
+    if (outside_fourier_window(std::sqrt(radius_squared))) {
         rms_amplitude = 0.0;
     }
 
@@ -162,8 +161,7 @@ void initializef() {
     f.resize(N * N * N, 0.0);
     fd.resize(N * N * N, 0.0);
 
-    double p2, p2lat;
-    double dp2 = pw2(2.0 * pi / L);
+    double p2, radius_squared;
     double initial_field_values = initial_field;
     double initial_field_derivs = initial_derivative;
     int i, j, k, iconj, jconj;
@@ -184,39 +182,39 @@ void initializef() {
 
             for (k = 1; k < N / 2; k++) {
                 pz = k;
-                p2lat = dp2 * (pw2(px) + pw2(py) + pw2(pz));
+                radius_squared = pw2(px) + pw2(py) + pw2(pz);
                 p2 = spatial::effective_momentum_squared(px, py, pz, dx);
-                set_mode(p2, p2lat, initial_mass_squared, &f[idx(i,j,2*k)], &fd[idx(i,j,2*k)], 0);
+                set_mode(p2, radius_squared, initial_mass_squared, &f[idx(i,j,2*k)], &fd[idx(i,j,2*k)], 0);
             }
 
             if (j > N / 2 || (i > N / 2 && (j == 0 || j == N / 2))) {
                 jconj = (j == 0 ? 0 : N - j);
 
-                p2lat = dp2 * (pw2(px) + pw2(py));
+                radius_squared = pw2(px) + pw2(py);
                 p2 = spatial::effective_momentum_squared(px, py, 0, dx);
-                set_mode(p2, p2lat, initial_mass_squared, &f[idx(i,j,0)], &fd[idx(i,j,0)], 0);
+                set_mode(p2, radius_squared, initial_mass_squared, &f[idx(i,j,0)], &fd[idx(i,j,0)], 0);
 
                 f[idx(iconj,jconj,0)] = f[idx(i,j,0)];
                 f[idx(iconj,jconj,1)] = -f[idx(i,j,1)];
                 fd[idx(iconj,jconj,0)] = fd[idx(i,j,0)];
                 fd[idx(iconj,jconj,1)] = -fd[idx(i,j,1)];
 
-                p2lat = dp2 * (pw2(px) + pw2(py) + pw2(N / 2));
+                radius_squared = pw2(px) + pw2(py) + pw2(N / 2);
                 p2 = spatial::effective_momentum_squared(px, py, N / 2, dx);
-                set_mode(p2, p2lat, initial_mass_squared, &fnyquist_p[i][2*j], &fdnyquist_p[i][2*j], 0);
+                set_mode(p2, radius_squared, initial_mass_squared, &fnyquist_p[i][2*j], &fdnyquist_p[i][2*j], 0);
 
                 fnyquist_p[iconj][2*jconj]   = fnyquist_p[i][2*j];
                 fnyquist_p[iconj][2*jconj+1] = -fnyquist_p[i][2*j+1];
                 fdnyquist_p[iconj][2*jconj]   = fdnyquist_p[i][2*j];
                 fdnyquist_p[iconj][2*jconj+1] = -fdnyquist_p[i][2*j+1];
             } else if ((i == 0 || i == N / 2) && (j == 0 || j == N / 2)) {
-                p2lat = dp2 * (pw2(px) + pw2(py));
+                radius_squared = pw2(px) + pw2(py);
                 p2 = spatial::effective_momentum_squared(px, py, 0, dx);
-                if (p2 > 0.0) set_mode(p2, p2lat, initial_mass_squared, &f[idx(i,j,0)], &fd[idx(i,j,0)], 1);
+                if (p2 > 0.0) set_mode(p2, radius_squared, initial_mass_squared, &f[idx(i,j,0)], &fd[idx(i,j,0)], 1);
 
-                p2lat = dp2 * (pw2(px) + pw2(py) + pw2(N / 2));
+                radius_squared = pw2(px) + pw2(py) + pw2(N / 2);
                 p2 = spatial::effective_momentum_squared(px, py, N / 2, dx);
-                set_mode(p2, p2lat, initial_mass_squared, &fnyquist_p[i][2*j], &fdnyquist_p[i][2*j], 1);
+                set_mode(p2, radius_squared, initial_mass_squared, &fnyquist_p[i][2*j], &fdnyquist_p[i][2*j], 1);
             }
         }
     }

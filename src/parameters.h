@@ -180,6 +180,12 @@ extern double af_post_inflation;
 // Optional Fourier-space cutoff controls.
 extern double high_cutoff_index;
 extern double low_cutoff_index;
+
+// Bounds are inclusive in DFT index units. Zero disables that bound.
+inline bool outside_fourier_window(double radius) {
+    return radius < low_cutoff_index || (high_cutoff_index > 0 && radius > high_cutoff_index);
+}
+
 extern int forcing_cutoff;
 
 // Output switches (1 = on, 0 = off).

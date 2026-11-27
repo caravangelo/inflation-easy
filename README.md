@@ -129,6 +129,14 @@ The most commonly adjusted run-time keys in `params.txt` are summarized below.
 - `linear_metric_perturbations`: set to `1` to add the leading linear scalar metric correction during the inflationary evolution. It defaults to `0` and, as a run-time option, does not require recompilation.
 - `output_bispectrum`: set to `1` to compute the equilateral scalar-field bispectrum at the final inflationary time. The resulting `bispectra.dat` file contains only equilateral configurations and does not contain general triangle configurations. This calculation is computationally expensive for large lattices and is disabled by default.
 
+The optional `low_cutoff_index` and `high_cutoff_index` bounds select the Fourier
+modes used to initialize scalar fluctuations. The bounds are inclusive in lattice
+Fourier-index units. Set either bound to zero to disable it. For example, a lower
+bound of 2 and an upper bound of 0 keep all fluctuation modes of radius 2 or
+greater. With `forcing_cutoff=1`, each scalar spectrum output also applies these
+bounds to the live field and velocity after writing the spectrum, preserving
+their homogeneous modes.
+
 #### $\delta N$ Stage
 
 These parameters are used when `perform_deltaN=1`:

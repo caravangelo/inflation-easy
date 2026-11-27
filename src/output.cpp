@@ -390,7 +390,7 @@ void spectraf()
     double pdisc;
     int arraysize[] = {N, N, N};
 
-    if (high_cutoff_index > 0 && forcing_cutoff)
+    if (forcing_cutoff && (low_cutoff_index > 0 || high_cutoff_index > 0))
     {
         // FFT of fd to k-space (double version)
         fftrnd(fd.data(), (double *)fdnyquist_p, 3, arraysize, 1);
@@ -406,7 +406,7 @@ void spectraf()
                 {
                     pz = k;
                     pdisc = std::sqrt(pw2((double)px) + pw2((double)py) + pw2((double)pz));
-                    if (pdisc > high_cutoff_index || pdisc < low_cutoff_index)
+                    if (outside_fourier_window(pdisc))
                     {
                         kill_mode(&f[idx(i,j,2 * k)], &fd[idx(i,j,2 * k)]);
                     }
@@ -417,7 +417,7 @@ void spectraf()
                     jconj = (j == 0 ? 0 : N - j);
 
                     pdisc = std::sqrt(pw2((double)px) + pw2((double)py));
-                    if (pdisc > high_cutoff_index || pdisc < low_cutoff_index)
+                    if (outside_fourier_window(pdisc))
                     {
                         kill_mode(&f[idx(i,j,0)], &fd[idx(i,j,0)]);
                         f[idx(iconj,jconj,0)] = f[idx(i,j,0)];
@@ -427,7 +427,7 @@ void spectraf()
                     }
 
                     pdisc = std::sqrt(pw2((double)px) + pw2((double)py) + pw2((double)(N / 2.)));
-                    if (pdisc > high_cutoff_index || pdisc < low_cutoff_index)
+                    if (outside_fourier_window(pdisc))
                     {
                         kill_mode(&fnyquist_p[i][2 * j], &fdnyquist_p[i][2 * j]);
                         fnyquist_p[iconj][2 * jconj]     = fnyquist_p[i][2 * j];
@@ -440,13 +440,13 @@ void spectraf()
                 {
                     pdisc = std::sqrt(pw2((double)px) + pw2((double)py));
                     // The zero mode carries the homogeneous solution.
-                    if (pdisc != 0.0 && (pdisc > high_cutoff_index || pdisc < low_cutoff_index))
+                    if (pdisc != 0.0 && outside_fourier_window(pdisc))
                     {
                         kill_mode(&f[idx(i,j,0)], &fd[idx(i,j,0)]);
                     }
 
                     pdisc = std::sqrt(pw2((double)px) + pw2((double)py) + pw2((double)(N / 2.)));
-                    if (pdisc > high_cutoff_index || pdisc < low_cutoff_index)
+                    if (outside_fourier_window(pdisc))
                     {
                         kill_mode(&fnyquist_p[i][2 * j], &fdnyquist_p[i][2 * j]);
                     }
@@ -1736,7 +1736,7 @@ void spectraf_post_inflation()
     double pdisc;
     int arraysize[] = {N, N, N};
 
-    if (high_cutoff_index > 0 && forcing_cutoff)
+    if (forcing_cutoff && (low_cutoff_index > 0 || high_cutoff_index > 0))
     {
         fftrnd(fd.data(), (double *)fdnyquist_p, 3, arraysize, 1);
         for (i = 0; i < N; i++)
@@ -1750,7 +1750,7 @@ void spectraf_post_inflation()
                 {
                     pz = k;
                     pdisc = sqrt(pw2((double)px) + pw2((double)py) + pw2((double)pz));
-                    if (pdisc > high_cutoff_index || pdisc < low_cutoff_index)
+                    if (outside_fourier_window(pdisc))
                     {
                         kill_mode(&f[idx(i,j,2 * k)], &fd[idx(i,j,2 * k)]);
                     }
@@ -1761,7 +1761,7 @@ void spectraf_post_inflation()
                     jconj = (j == 0 ? 0 : N - j);
 
                     pdisc = sqrt(pw2((double)px) + pw2((double)py));
-                    if (pdisc > high_cutoff_index || pdisc < low_cutoff_index)
+                    if (outside_fourier_window(pdisc))
                     {
                         kill_mode(&f[idx(i,j,0)], &fd[idx(i,j,0)]);
                         f[idx(iconj,jconj,0)] = f[idx(i,j,0)];
@@ -1771,7 +1771,7 @@ void spectraf_post_inflation()
                     }
 
                     pdisc = sqrt(pw2((double)px) + pw2((double)py) + pw2((double)N / 2.));
-                    if (pdisc > high_cutoff_index || pdisc < low_cutoff_index)
+                    if (outside_fourier_window(pdisc))
                     {
                         kill_mode(&fnyquist_p[i][2 * j], &fdnyquist_p[i][2 * j]);
                         fnyquist_p[iconj][2 * jconj] = fnyquist_p[i][2 * j];
@@ -1784,13 +1784,13 @@ void spectraf_post_inflation()
                 {
                     pdisc = sqrt(pw2((double)px) + pw2((double)py));
                     // The zero mode carries the homogeneous solution.
-                    if (pdisc != 0.0 && (pdisc > high_cutoff_index || pdisc < low_cutoff_index))
+                    if (pdisc != 0.0 && outside_fourier_window(pdisc))
                     {
                         kill_mode(&f[idx(i,j,0)], &fd[idx(i,j,0)]);
                     }
 
                     pdisc = sqrt(pw2((double)px) + pw2((double)py) + pw2((double)N / 2.));
-                    if (pdisc > high_cutoff_index || pdisc < low_cutoff_index)
+                    if (outside_fourier_window(pdisc))
                     {
                         kill_mode(&fnyquist_p[i][2 * j], &fdnyquist_p[i][2 * j]);
                     }
