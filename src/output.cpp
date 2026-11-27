@@ -439,7 +439,8 @@ void spectraf()
                 else if ((i == 0 || i == N / 2) && (j == 0 || j == N / 2))
                 {
                     pdisc = std::sqrt(pw2((double)px) + pw2((double)py));
-                    if (pdisc > high_cutoff_index || pdisc < low_cutoff_index)
+                    // The zero mode carries the homogeneous solution.
+                    if (pdisc != 0.0 && (pdisc > high_cutoff_index || pdisc < low_cutoff_index))
                     {
                         kill_mode(&f[idx(i,j,0)], &fd[idx(i,j,0)]);
                     }
@@ -1782,7 +1783,8 @@ void spectraf_post_inflation()
                 else if ((i == 0 || i == N / 2) && (j == 0 || j == N / 2))
                 {
                     pdisc = sqrt(pw2((double)px) + pw2((double)py));
-                    if (pdisc > high_cutoff_index || pdisc < low_cutoff_index)
+                    // The zero mode carries the homogeneous solution.
+                    if (pdisc != 0.0 && (pdisc > high_cutoff_index || pdisc < low_cutoff_index))
                     {
                         kill_mode(&f[idx(i,j,0)], &fd[idx(i,j,0)]);
                     }
