@@ -21,4 +21,5 @@ LinearMetricCorrection compute_linear_metric_correction(
     const std::vector<double>& field_derivative,
     double scale_factor,
     double scale_factor_derivative,
-    double scale_factor_second_derivative);
+    double scale_factor_second_derivative,
+    double velocity_time_offset = 0.0);

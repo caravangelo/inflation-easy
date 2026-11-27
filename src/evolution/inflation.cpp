@@ -96,7 +96,7 @@ void apply_scalar_leapfrog_kick(
         // Friction on the average of the old and new phi' keeps the kick
         // second order.
         const double h = 0.5 * step_size * friction;
-        fd[id] = (fd[id] * (1.0 - h) + step_size * force) / (1.0 + h);
+        fd[id] = evolution::damped_kick(fd[id], force, step_size, h);
     }
 }
 
@@ -124,13 +124,12 @@ void evolution::apply_inflation_leapfrog_kick(double step_size) {
 
     ad += 0.5 * step_size * ad2;
 
-    // Scalar kick. The metric correction is evaluated with the stored phi',
-    // which lags the fields by half a step.
+    // Use the same midpoint geometry for scalar and tensor damping.
     const double friction = (2.0 + rescale_s) * ad / a;
     const double potential_force_coefficient = std::pow(a, 2.0 - 2.0 * rescale_s);
     if (linear_metric_perturbations) {
         const LinearMetricCorrection metric_correction =
-            compute_linear_metric_correction(f, fd, a, ad, ad2);
+            compute_linear_metric_correction(f, fd, a, ad, ad2, 0.5 * step_size);
         apply_scalar_leapfrog_kick<true>(
             step_size, laplacian_coefficient, friction, potential_force_coefficient,
             metric_correction.rhs_coefficient,
@@ -163,55 +162,12 @@ void evolution::apply_inflation_leapfrog_kick(double step_size) {
         const double gy = gradient.component[1];
         const double gz = gradient.component[2];
 
-        const double T_xx = gx * gx;
-        const double T_yy = gy * gy;
-        const double T_zz = gz * gz;
-        const double T_xy = gx * gy;
-        const double T_xz = gx * gz;
-        const double T_yz = gy * gz;
-
-        // Evaluate each RHS in double precision and cast once on storage.
-        {
-            const double lap_h = static_cast<double>(spatial::laplacian(i,j,k,hij[0]));
-            const double rhs = step_size * ( laplacian_coefficient * lap_h
-            - friction * static_cast<double>(hijd[0][id])
-            + tensor_source_prefactor * T_xx );
-            hijd[0][id] += static_cast<float>(rhs);
-        }
-        {
-            const double lap_h = static_cast<double>(spatial::laplacian(i,j,k,hij[1]));
-            const double rhs = step_size * ( laplacian_coefficient * lap_h
-            - friction * static_cast<double>(hijd[1][id])
-            + tensor_source_prefactor * T_yy );
-            hijd[1][id] += static_cast<float>(rhs);
-        }
-        {
-            const double lap_h = static_cast<double>(spatial::laplacian(i,j,k,hij[2]));
-            const double rhs = step_size * ( laplacian_coefficient * lap_h
-            - friction * static_cast<double>(hijd[2][id])
-            + tensor_source_prefactor * T_zz );
-            hijd[2][id] += static_cast<float>(rhs);
-        }
-        {
-            const double lap_h = static_cast<double>(spatial::laplacian(i,j,k,hij[3]));
-            const double rhs = step_size * ( laplacian_coefficient * lap_h
-            - friction * static_cast<double>(hijd[3][id])
-            + tensor_source_prefactor * T_xy );
-            hijd[3][id] += static_cast<float>(rhs);
-        }
-        {
-            const double lap_h = static_cast<double>(spatial::laplacian(i,j,k,hij[4]));
-            const double rhs = step_size * ( laplacian_coefficient * lap_h
-            - friction * static_cast<double>(hijd[4][id])
-            + tensor_source_prefactor * T_xz );
-            hijd[4][id] += static_cast<float>(rhs);
-        }
-        {
-            const double lap_h = static_cast<double>(spatial::laplacian(i,j,k,hij[5]));
-            const double rhs = step_size * ( laplacian_coefficient * lap_h
-            - friction * static_cast<double>(hijd[5][id])
-            + tensor_source_prefactor * T_yz );
-            hijd[5][id] += static_cast<float>(rhs);
+        const double source[6] = {gx*gx, gy*gy, gz*gz, gx*gy, gx*gz, gy*gz};
+        for (int c = 0; c < 6; ++c) {
+            const double force = laplacian_coefficient * spatial::laplacian(i,j,k,hij[c])
+                               + tensor_source_prefactor * source[c];
+            hijd[c][id] = static_cast<float>(evolution::damped_kick(
+                hijd[c][id], force, step_size, 0.5 * step_size * friction));
         }
     }
 #endif

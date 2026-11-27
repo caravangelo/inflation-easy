@@ -120,33 +120,34 @@ INFLATIONEASY_NOINLINE void compute_tensor_source_derivatives(
 }
 
 // One leapfrog kick of Phi', a' and h_ij' (equations in the file header).
-// a'' is evaluated from the stored a' (it vanishes for radiation, w = 1/3,
-// with s = 0). The tensor source uses Phi at the kick time and the stored
-// Phi', which lags by half a step.
 void apply_post_inflation_leapfrog_kick(double step_size) {
     DECLARE_INDICES
 
     const double laplacian_coefficient = std::pow(a, -2.0 * rescale_s) / pw2(dx);
 
-    // a'' = [(1-3w)/2 - s] a'^2/a
-    ad2 = - ( rescale_s - 0.5*(1.0 - 3.0*omega)) * pw2(ad) / a;
+    // Predict a' at the midpoint before evaluating the quadratic acceleration.
+    const double half_step = 0.5 * step_size;
+    const double expansion = (0.5 * (1.0 - 3.0 * omega) - rescale_s) / a;
+    const double predicted_ad = ad + half_step * expansion * pw2(ad);
+    ad2 = expansion * pw2(predicted_ad);
+    ad += half_step * ad2;
 
-    ad += 0.5 * step_size * ad2;
-
-    // Scalar kick: linear Bardeen equation.
+    const double scalar_friction = (3.0 * (1.0 + omega) + rescale_s) * ad / a;
+    const double scalar_laplacian = omega * laplacian_coefficient;
 #if parallel_calculation
 #pragma omp parallel for collapse(3)
 #endif
     LOOP {
-        fd[idx(i,j,k)] += step_size * (
-        omega * laplacian_coefficient * spatial::laplacian(i, j, k, f)
-        - (3.0 * (1.0 + omega) + rescale_s) * ad * fd[idx(i,j,k)] / a
-        );
+        const size_t id = idx(i,j,k);
+        const double force = scalar_laplacian * spatial::laplacian(i,j,k,f);
+        // Store the midpoint Phi' for the source stencil at neighboring sites.
+        fd[id] = (fd[id] + half_step * force) / (1.0 + half_step * scalar_friction);
     }
 
 #if calculate_SIGW
     // Precompute time-dependent factors once per call (hot loop optimization)
     const double code_hubble = ad / a;
+    const double half_drag = half_step * (2.0 + rescale_s) * code_hubble;
     const double inverse_code_hubble = 1.0 / code_hubble;
     const double velocity_source_coefficient = 4.0 / (3.0 * (1.0 + omega));
 
@@ -210,61 +211,24 @@ void apply_post_inflation_leapfrog_kick(double step_size) {
             + 2.0 * gy * gz
             - velocity_source_coefficient * (grad_u_y * grad_u_z);
 
-        // Update the six stored components of the symmetric tensor.
-        {
-            const double lap_h = static_cast<double>(spatial::laplacian(i, j, k, hij[0]));
-            const double rhs = step_size * (
-            laplacian_coefficient * lap_h
-            - (2.0 + rescale_s) * ad * static_cast<double>(hijd[0][id]) / a
-            + tensor_source_prefactor * source_xx
-            );
-            hijd[0][id] += static_cast<float>(rhs);
+        const double source[6] = {source_xx, source_yy, source_zz, source_xy, source_xz, source_yz};
+        for (int c = 0; c < 6; ++c) {
+            const double force = laplacian_coefficient * spatial::laplacian(i,j,k,hij[c])
+                               + tensor_source_prefactor * source[c];
+            hijd[c][id] = static_cast<float>(evolution::damped_kick(
+                hijd[c][id], force, step_size, half_drag));
         }
-        {
-            const double lap_h = static_cast<double>(spatial::laplacian(i, j, k, hij[1]));
-            const double rhs = step_size * (
-            laplacian_coefficient * lap_h
-            - (2.0 + rescale_s) * ad * static_cast<double>(hijd[1][id]) / a
-            + tensor_source_prefactor * source_yy
-            );
-            hijd[1][id] += static_cast<float>(rhs);
-        }
-        {
-            const double lap_h = static_cast<double>(spatial::laplacian(i, j, k, hij[2]));
-            const double rhs = step_size * (
-            laplacian_coefficient * lap_h
-            - (2.0 + rescale_s) * ad * static_cast<double>(hijd[2][id]) / a
-            + tensor_source_prefactor * source_zz
-            );
-            hijd[2][id] += static_cast<float>(rhs);
-        }
-        {
-            const double lap_h = static_cast<double>(spatial::laplacian(i, j, k, hij[3]));
-            const double rhs = step_size * (
-            laplacian_coefficient * lap_h
-            - (2.0 + rescale_s) * ad * static_cast<double>(hijd[3][id]) / a
-            + tensor_source_prefactor * source_xy
-            );
-            hijd[3][id] += static_cast<float>(rhs);
-        }
-        {
-            const double lap_h = static_cast<double>(spatial::laplacian(i, j, k, hij[4]));
-            const double rhs = step_size * (
-            laplacian_coefficient * lap_h
-            - (2.0 + rescale_s) * ad * static_cast<double>(hijd[4][id]) / a
-            + tensor_source_prefactor * source_xz
-            );
-            hijd[4][id] += static_cast<float>(rhs);
-        }
-        {
-            const double lap_h = static_cast<double>(spatial::laplacian(i, j, k, hij[5]));
-            const double rhs = step_size * (
-            laplacian_coefficient * lap_h
-            - (2.0 + rescale_s) * ad * static_cast<double>(hijd[5][id]) / a
-            + tensor_source_prefactor * source_yz
-            );
-            hijd[5][id] += static_cast<float>(rhs);
-        }
+    }
+
+    // Finish the scalar kick after every source stencil has read midpoint Phi'.
+    // Recompute the Laplacian to avoid a lattice-sized temporary.
+#if parallel_calculation
+#pragma omp parallel for collapse(3)
+#endif
+    LOOP {
+        const size_t id = idx(i,j,k);
+        fd[id] += half_step * (scalar_laplacian * spatial::laplacian(i,j,k,f)
+                            - scalar_friction * fd[id]);
     }
 #endif
 
@@ -307,7 +271,8 @@ void run_post_inflation_loop(FILE* output_log) {
         case INTEGRATOR_LEAPFROG: {
             apply_leapfrog_drift(0.5 * dt_post_inflation);
 
-            while (a <= af_post_inflation) {
+            // Test the scale factor at the same time as the saved state.
+            while (a - 0.5 * dt_post_inflation * ad <= af_post_inflation) {
                 apply_post_inflation_leapfrog_kick(dt_post_inflation);
                 apply_leapfrog_drift(dt_post_inflation);
 

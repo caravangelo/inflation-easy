@@ -70,6 +70,12 @@
 
 namespace evolution {
 
+// Midpoint kick for v' = force - friction*v, with force and friction
+// evaluated halfway through the velocity step.
+inline double damped_kick(double velocity, double force, double step, double half_drag) {
+    return (velocity * (1.0 - half_drag) + step * force) / (1.0 + half_drag);
+}
+
 #if calculate_SIGW || post_inflation
 // Periodic derivative along axis 0/1/2 = x/y/z, INCLUDING 1/dx. In contrast,
 // spatial::laplacian() omits 1/dx^2, which its callers must supply.
