@@ -79,25 +79,8 @@ inline double mixed_second_derivative(
     int k,
     const std::vector<double>& field)
 {
-    if constexpr (spatial::order == 2) {
-        const int ip = (first_axis == 0 || second_axis == 0)
-            ? spatial::increment(i) : i;
-        const int im = (first_axis == 0 || second_axis == 0)
-            ? spatial::decrement(i) : i;
-        const int jp = (first_axis == 1 || second_axis == 1)
-            ? spatial::increment(j) : j;
-        const int jm = (first_axis == 1 || second_axis == 1)
-            ? spatial::decrement(j) : j;
-        const int kp = (first_axis == 2 || second_axis == 2)
-            ? spatial::increment(k) : k;
-        const int km = (first_axis == 2 || second_axis == 2)
-            ? spatial::decrement(k) : k;
-        return (field[idx(ip, jp, kp)] - field[idx(ip, jm, km)]
-              - field[idx(im, jp, kp)] + field[idx(im, jm, km)]) / (4.0 * dx * dx);
-    } else {
-        return spatial::mixed_derivative(
-            first_axis, second_axis, i, j, k, field, dx);
-    }
+    return spatial::mixed_derivative(
+        first_axis, second_axis, i, j, k, field, dx);
 }
 
 // Cache the gradient and Hessian entries reused by the tensor-source terms.

@@ -230,14 +230,11 @@ inline T mixed_derivative(
 {
     static_assert(order == 2 || order == 4 || order == 6, "Unsupported stencil order");
     if constexpr (order == 2) {
-        const int ip = (d1 == 0 || d2 == 0) ? increment(i) : i;
-        const int im = (d1 == 0 || d2 == 0) ? decrement(i) : i;
-        const int jp = (d1 == 1 || d2 == 1) ? increment(j) : j;
-        const int jm = (d1 == 1 || d2 == 1) ? decrement(j) : j;
-        const int kp = (d1 == 2 || d2 == 2) ? increment(k) : k;
-        const int km = (d1 == 2 || d2 == 2) ? decrement(k) : k;
-        return (field[index(ip, jp, kp)] - field[index(ip, jm, km)]
-              - field[index(im, jp, kp)] + field[index(im, jm, km)])
+        const auto pp = offset_two_axes(d1, 1, d2, 1, i, j, k);
+        const auto pm = offset_two_axes(d1, 1, d2, -1, i, j, k);
+        const auto mp = offset_two_axes(d1, -1, d2, 1, i, j, k);
+        const auto mm = offset_two_axes(d1, -1, d2, -1, i, j, k);
+        return (field[pp] - field[pm] - field[mp] + field[mm])
              / T(4.0 * spacing * spacing);
     } else {
         constexpr int count = order;

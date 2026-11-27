@@ -58,7 +58,6 @@ int main() {
     }
 
     const double qx = first_derivative_wave_number(mx, spacing);
-    const double qy = first_derivative_wave_number(my, spacing);
     const double dx_field = spatial::first_derivative(0, i, j, k, field, spacing);
     if (!close(dx_field, -qx * std::sin(phase))) {
         std::fprintf(stderr, "order %d: first derivative mismatch\n", spatial::order);
@@ -72,11 +71,18 @@ int main() {
         return 1;
     }
 
-    const double dxy_field = spatial::mixed_derivative(0, 1, i, j, k, field, spacing);
-    if (!close(dxy_field, -qx * qy * value)) {
-        std::fprintf(stderr, "order %d: mixed derivative mismatch\n", spatial::order);
-        return 1;
-    }
+    const double qy = first_derivative_wave_number(my, spacing);
+    const double qz = first_derivative_wave_number(mz, spacing);
+    const auto check_mixed = [&](int first, int second, double expected, const char* axes) {
+        const double mixed = spatial::mixed_derivative(first, second, i, j, k, field, spacing);
+        if (close(mixed, expected)) return true;
+        std::fprintf(stderr, "order %d: %s mixed derivative %.12g, expected %.12g\n",
+                     spatial::order, axes, mixed, expected);
+        return false;
+    };
+    if (!check_mixed(0, 1, -qx * qy * value, "xy")) return 1;
+    if (!check_mixed(0, 2, -qx * qz * value, "xz")) return 1;
+    if (!check_mixed(1, 2, -qy * qz * value, "yz")) return 1;
 
     // High-momentum endpoint of Fig. 9 in Appendix C of arXiv:2102.06378,
     // averaged with the same rounded shells and real-FFT multiplicities used
