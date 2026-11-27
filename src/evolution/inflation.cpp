@@ -88,13 +88,15 @@ void apply_scalar_leapfrog_kick(
 #endif
     LOOP {
         const size_t id = idx(i,j,k);
-        double rhs = laplacian_coefficient * spatial::laplacian(i, j, k, f)
-                   - friction * fd[id]
-                   - potential_force_coefficient * potential_derivative(i, j, k);
+        double force = laplacian_coefficient * spatial::laplacian(i, j, k, f)
+                     - potential_force_coefficient * potential_derivative(i, j, k);
         if constexpr (IncludeLinearMetric) {
-            rhs += metric_coefficient * (f[id] - metric_field_mean);
+            force += metric_coefficient * (f[id] - metric_field_mean);
         }
-        fd[id] += step_size * rhs;
+        // Friction on the average of the old and new phi' keeps the kick
+        // second order.
+        const double h = 0.5 * step_size * friction;
+        fd[id] = (fd[id] * (1.0 - h) + step_size * force) / (1.0 + h);
     }
 }
 
@@ -123,7 +125,7 @@ void evolution::apply_inflation_leapfrog_kick(double step_size) {
     ad += 0.5 * step_size * ad2;
 
     // Scalar kick. The metric correction is evaluated with the stored phi',
-    // which, like the friction term, lags the fields by half a step.
+    // which lags the fields by half a step.
     const double friction = (2.0 + rescale_s) * ad / a;
     const double potential_force_coefficient = std::pow(a, 2.0 - 2.0 * rescale_s);
     if (linear_metric_perturbations) {
