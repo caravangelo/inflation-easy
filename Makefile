@@ -111,6 +111,7 @@ test-smoke: test-inputs
 	python3 tests/release_smoke.py --repo . --tier ci
 	python3 tests/spectrum_zero_mode.py
 	python3 tests/potential_table_lookup.py
+	python3 tests/leapfrog_convergence.py
 
 # Focused memory/undefined-behaviour checks for historically delicate outputs.
 test-sanitizers:

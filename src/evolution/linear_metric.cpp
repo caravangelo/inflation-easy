@@ -28,7 +28,8 @@ LinearMetricBackground compute_background(
     const std::vector<double>& field,
     const std::vector<double>& field_derivative,
     double scale_factor,
-    double scale_factor_derivative)
+    double scale_factor_derivative,
+    double velocity_time_offset)
 {
     LinearMetricBackground background;
     double field_sum = 0.0;
@@ -63,9 +64,13 @@ LinearMetricBackground compute_background(
     const double potential_deriv_mean = potential_deriv_sum * inv_size;
     const double potential_force_coefficient =
         std::pow(scale_factor, 2.0 - 2.0 * rescale_s);
-    background.deriv2_mean =
-        -(2.0 + rescale_s) * code_hubble * background.deriv_mean
-        - potential_force_coefficient * potential_deriv_mean;
+    const double friction = (2.0 + rescale_s) * code_hubble;
+    const double force = -potential_force_coefficient * potential_deriv_mean;
+    // The periodic Laplacian and the metric fluctuation force both average
+    // to zero. Solve the mean kick for the velocity at the field time.
+    background.deriv_mean = (background.deriv_mean + velocity_time_offset * force)
+                          / (1.0 + velocity_time_offset * friction);
+    background.deriv2_mean = force - friction * background.deriv_mean;
     return background;
 }
 
@@ -74,15 +79,15 @@ LinearMetricBackground compute_background(
 // Returns <phi> and C = -a^(2-2s) Dm^2_metric / B^2. Writing Dm^2_metric in
 // code units (phidot = B a^(s-1) phi', H = B a^(s-2) a') gives
 //     C = (s+3) <phi'>^2 + 2 <phi'><phi''> a/a' - <phi'>^2 a a''/a'^2.
-// a, a', a'' and the field data should refer to the same time. RK stages do;
-// the leapfrog kick passes the stored phi', half a step behind the fields.
+// RK stage data are synchronized. Leapfrog supplies the half-step offset.
 // Degenerate input (empty lattice, a <= 0 or a' = 0) gives C = 0.
 LinearMetricCorrection compute_linear_metric_correction(
     const std::vector<double>& field,
     const std::vector<double>& field_derivative,
     double scale_factor,
     double scale_factor_derivative,
-    double scale_factor_second_derivative)
+    double scale_factor_second_derivative,
+    double velocity_time_offset)
 {
     LinearMetricCorrection correction;
     if (field.empty() || field.size() != field_derivative.size()
@@ -91,7 +96,7 @@ LinearMetricCorrection compute_linear_metric_correction(
     }
 
     const LinearMetricBackground background = compute_background(
-        field, field_derivative, scale_factor, scale_factor_derivative);
+        field, field_derivative, scale_factor, scale_factor_derivative, velocity_time_offset);
 
     correction.field_mean = background.field_mean;
     const double code_hubble = scale_factor_derivative / scale_factor;
